@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Public+Sans:wght@400;500;700;800&display=swap');
+
+:root {
+  --ink: #112132;
+  --panel-bg: rgba(255, 255, 255, 0.86);
+  --team-a: #b43a53;
+  --team-a-dark: #8d2d41;
+  --team-b: #7c4aa8;
+  --team-b-dark: #5f387f;
+  font-family: 'Public Sans', 'Segoe UI', sans-serif;
+  line-height: 1.4;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
