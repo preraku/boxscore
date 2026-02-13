@@ -395,6 +395,8 @@ function App() {
       return
     }
 
+    let shareDebugContext: Record<string, unknown> | undefined
+
     try {
       setIsSharing(true)
       setShareStatus('')
@@ -421,15 +423,55 @@ function App() {
         title: `${teams.map((team) => team.label).join(' vs ')} Box Score`,
         files: [imageFile],
       }
+      const canSharePayload = navigator.canShare?.(sharePayload) ?? false
+      shareDebugContext = {
+        secureContext: window.isSecureContext,
+        visibilityState: document.visibilityState,
+        supportsShare: typeof navigator.share === 'function',
+        supportsCanShare: typeof navigator.canShare === 'function',
+        canSharePayload,
+        userActivation: {
+          isActive: navigator.userActivation?.isActive ?? null,
+          hasBeenActive: navigator.userActivation?.hasBeenActive ?? null,
+        },
+        sharePayload: {
+          title: sharePayload.title,
+          fileCount: sharePayload.files.length,
+          files: sharePayload.files.map((file) => ({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+          })),
+        },
+      }
 
-      if (navigator.share && navigator.canShare?.(sharePayload)) {
+      if (navigator.share && canSharePayload) {
         await navigator.share(sharePayload)
         setShareStatus('Shared successfully.')
       } else {
+        console.info('[shareBoxScore] Falling back to download.', shareDebugContext)
         downloadBlob(imageBlob, filename)
         setShareStatus('Image downloaded. Share it from Photos/Files.')
       }
-    } catch {
+    } catch (error) {
+      const normalizedError =
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : { value: error }
+      console.error('[shareBoxScore] Share failed.', {
+        error: normalizedError,
+        secureContext: window.isSecureContext,
+        visibilityState: document.visibilityState,
+        userActivation: {
+          isActive: navigator.userActivation?.isActive ?? null,
+          hasBeenActive: navigator.userActivation?.hasBeenActive ?? null,
+        },
+        shareDebugContext,
+      })
       setShareStatus('Could not share image. Try again.')
     } finally {
       setIsSharing(false)
