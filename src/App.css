@@ -523,7 +523,7 @@
 
 .stats-table {
   width: 100%;
-  min-width: 25.5rem;
+  min-width: 31rem;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.8rem;
@@ -539,7 +539,7 @@
 
 .stats-table th:nth-child(1),
 .stats-table td:nth-child(1) {
-  width: 32%;
+  width: 30%;
 }
 
 .stats-table th:first-child,
@@ -554,7 +554,7 @@
 
 .stats-table th:nth-child(n + 3),
 .stats-table td:nth-child(n + 3) {
-  width: 11.6%;
+  width: 8.5%;
 }
 
 .stats-table thead th {

@@ -5,7 +5,16 @@ import './App.css'
 type TeamSize = 4 | 5
 type TeamId = 'A' | 'B'
 type ScoringMode = 'twosAndThrees' | 'onesAndTwos'
-type StatKey = 'lowPA' | 'lowPM' | 'highPA' | 'highPM' | 'ast' | 'stl' | 'blk'
+type StatKey =
+  | 'lowPA'
+  | 'lowPM'
+  | 'highPA'
+  | 'highPM'
+  | 'ast'
+  | 'stl'
+  | 'blk'
+  | 'reb'
+  | 'tov'
 
 type StatLine = {
   lowPA: number
@@ -15,6 +24,8 @@ type StatLine = {
   ast: number
   stl: number
   blk: number
+  reb: number
+  tov: number
 }
 
 type StatDelta = Partial<Record<StatKey, number>>
@@ -62,6 +73,8 @@ const STAT_KEYS: StatKey[] = [
   'ast',
   'stl',
   'blk',
+  'reb',
+  'tov',
 ]
 
 const SCORING_CONFIG: Record<
@@ -122,6 +135,8 @@ const scoringActions = (mode: ScoringMode): ActionDefinition[] => {
     { id: 'ast', label: 'AST', short: 'AST', tone: 'event', delta: { ast: 1 } },
     { id: 'stl', label: 'STL', short: 'STL', tone: 'event', delta: { stl: 1 } },
     { id: 'blk', label: 'BLK', short: 'BLK', tone: 'event', delta: { blk: 1 } },
+    { id: 'reb', label: 'REB', short: 'REB', tone: 'event', delta: { reb: 1 } },
+    { id: 'tov', label: 'TOV', short: 'TOV', tone: 'event', delta: { tov: 1 } },
   ]
 }
 
@@ -133,6 +148,8 @@ const blankStatLine = (): StatLine => ({
   ast: 0,
   stl: 0,
   blk: 0,
+  reb: 0,
+  tov: 0,
 })
 
 const createSetupTeam = (label: string): SetupTeam => ({
@@ -503,6 +520,8 @@ function App() {
               <th>AST</th>
               <th>STL</th>
               <th>BLK</th>
+              <th>REB</th>
+              <th>TOV</th>
             </tr>
           </thead>
           <tbody>
@@ -515,6 +534,8 @@ function App() {
                 <td>{player.stats.ast}</td>
                 <td>{player.stats.stl}</td>
                 <td>{player.stats.blk}</td>
+                <td>{player.stats.reb}</td>
+                <td>{player.stats.tov}</td>
               </tr>
             ))}
             <tr className="total-row">
@@ -535,6 +556,8 @@ function App() {
               <td>{teamStatTotal(team, 'ast')}</td>
               <td>{teamStatTotal(team, 'stl')}</td>
               <td>{teamStatTotal(team, 'blk')}</td>
+              <td>{teamStatTotal(team, 'reb')}</td>
+              <td>{teamStatTotal(team, 'tov')}</td>
             </tr>
           </tbody>
         </table>
