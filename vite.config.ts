@@ -9,4 +9,7 @@ const basePath =
 export default defineConfig({
   plugins: [react()],
   base: basePath,
+  server: {
+    allowedHosts: ['.trycloudflare.com'],
+  },
 })

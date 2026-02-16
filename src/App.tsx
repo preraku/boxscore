@@ -78,6 +78,11 @@ type PersistedState = {
   lastAction: string
 }
 
+type PreparedShareImage = {
+  signature: string
+  file: File
+}
+
 const TEAM_IDS: TeamId[] = ['A', 'B']
 const STAT_KEYS: StatKey[] = [
   'lowPA',
@@ -418,6 +423,20 @@ const shootingLine = (made: number, attempts: number): string =>
 const teamColorClass = (teamId: TeamId): string =>
   teamId === 'A' ? 'team-a' : 'team-b'
 
+const shareCaptureSignature = (teams: Team[], scoringMode: ScoringMode): string =>
+  JSON.stringify({
+    scoringMode,
+    teams: teams.map((team) => ({
+      id: team.id,
+      label: team.label,
+      players: team.players.map((player) => ({
+        id: player.id,
+        name: player.name,
+        stats: player.stats,
+      })),
+    })),
+  })
+
 const applyDelta = (
   currentStats: StatLine,
   delta: StatDelta,
@@ -462,6 +481,9 @@ function App() {
     () => persistedState?.lastAction ?? '',
   )
   const [shareStatus, setShareStatus] = useState<string>('')
+  const [preparedShareImage, setPreparedShareImage] = useState<PreparedShareImage | null>(
+    null,
+  )
   const [isSharing, setIsSharing] = useState(false)
   const sharedBoxScoreRef = useRef<HTMLDivElement | null>(null)
 
@@ -497,6 +519,10 @@ function App() {
     history,
     lastAction,
   ])
+
+  useEffect(() => {
+    setPreparedShareImage(null)
+  }, [teams, gameScoringMode])
 
   const updateTeamLabel = (teamId: TeamId, label: string) => {
     setSetup((currentSetup) => ({
@@ -695,29 +721,43 @@ function App() {
     }
 
     let shareDebugContext: Record<string, unknown> | undefined
+    let imageFile: File | null = null
+    let usedPreparedImage = false
+    const captureSignature = shareCaptureSignature(teams, gameScoringMode)
 
     try {
       setIsSharing(true)
       setShareStatus('')
 
-      const canvas = await html2canvas(sharedBoxScoreRef.current, {
-        backgroundColor: '#ffffff',
-        scale: Math.max(window.devicePixelRatio || 1, 2),
-      })
+      if (preparedShareImage?.signature === captureSignature) {
+        imageFile = preparedShareImage.file
+        usedPreparedImage = true
+      } else {
+        const canvas = await html2canvas(sharedBoxScoreRef.current, {
+          backgroundColor: '#ffffff',
+          scale: Math.max(window.devicePixelRatio || 1, 2),
+        })
 
-      const imageBlob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, 'image/png')
-      })
+        const imageBlob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob(resolve, 'image/png')
+        })
 
-      if (!imageBlob) {
-        throw new Error('Could not generate screenshot image.')
+        if (!imageBlob) {
+          throw new Error('Could not generate screenshot image.')
+        }
+
+        const matchupLabel = teams
+          .map((team) => team.label.trim().replace(/\s+/g, '-').toLowerCase())
+          .join('-vs-')
+        const filename = `${matchupLabel || 'game'}-box-score.png`
+        imageFile = new File([imageBlob], filename, { type: 'image/png' })
+        setPreparedShareImage({ signature: captureSignature, file: imageFile })
       }
 
-      const matchupLabel = teams
-        .map((team) => team.label.trim().replace(/\s+/g, '-').toLowerCase())
-        .join('-vs-')
-      const filename = `${matchupLabel || 'game'}-box-score.png`
-      const imageFile = new File([imageBlob], filename, { type: 'image/png' })
+      if (!imageFile) {
+        throw new Error('Could not prepare share image.')
+      }
+
       const sharePayload = {
         title: `${teams.map((team) => team.label).join(' vs ')} Box Score`,
         files: [imageFile],
@@ -729,6 +769,7 @@ function App() {
         supportsShare: typeof navigator.share === 'function',
         supportsCanShare: typeof navigator.canShare === 'function',
         canSharePayload,
+        usedPreparedImage,
         userActivation: {
           isActive: navigator.userActivation?.isActive ?? null,
           hasBeenActive: navigator.userActivation?.hasBeenActive ?? null,
@@ -749,10 +790,11 @@ function App() {
         setShareStatus('Shared successfully.')
       } else {
         console.info('[shareBoxScore] Falling back to download.', shareDebugContext)
-        downloadBlob(imageBlob, filename)
+        downloadBlob(imageFile, imageFile.name)
         setShareStatus('Image downloaded. Share it from Photos/Files.')
       }
     } catch (error) {
+      const errorName = error instanceof Error ? error.name : ''
       const normalizedError =
         error instanceof Error
           ? {
@@ -771,6 +813,19 @@ function App() {
         },
         shareDebugContext,
       })
+      const lostTransientActivation =
+        errorName === 'NotAllowedError' &&
+        navigator.userActivation?.isActive === false &&
+        !usedPreparedImage &&
+        imageFile !== null
+      if (lostTransientActivation) {
+        console.warn(
+          '[shareBoxScore] Share blocked due to transient activation. Reusing prepared image on next tap.',
+          { shareDebugContext },
+        )
+        setShareStatus('Image ready. Tap Share Box Score again.')
+        return
+      }
       setShareStatus('Could not share image. Try again.')
     } finally {
       setIsSharing(false)
@@ -1075,7 +1130,11 @@ function App() {
                   onClick={shareBoxScore}
                   disabled={teams.length === 0 || isSharing}
                 >
-                  {isSharing ? 'Preparing Image...' : 'Share Box Score'}
+                  {isSharing
+                    ? 'Preparing Image...'
+                    : preparedShareImage
+                      ? 'Share Box Score (Ready)'
+                      : 'Share Box Score'}
                 </button>
               </div>
 
