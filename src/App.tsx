@@ -844,7 +844,7 @@ function App() {
   const renderTeamBoxScore = (team: Team) => (
     <article className="team-boxscore" key={team.id}>
       <h3 className={`team-boxscore-title ${teamColorClass(team.id)}`}>
-        {team.label} Box Score
+        {team.label}
       </h3>
       <div className="table-wrap">
         <table className="stats-table">
@@ -970,15 +970,10 @@ function App() {
                 return (
                   <article className="team-card" key={teamId}>
                     <div className="team-top-row">
-                      <label
-                        className="field-label"
-                        htmlFor={`team-label-${teamId}`}
-                      >
-                        Team Name
-                      </label>
                       <input
-                        id={`team-label-${teamId}`}
                         className="text-input"
+                        aria-label="Team Name"
+                        placeholder="Team Name"
                         value={team.label}
                         onChange={(event) =>
                           updateTeamLabel(teamId, event.target.value)
