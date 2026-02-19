@@ -428,6 +428,18 @@ const teamStatTotal = (team: Team, statKey: StatKey): number =>
 const shootingLine = (made: number, attempts: number): string =>
   `${made}/${attempts}`
 
+const playerFieldGoalsLine = (player: Player): string =>
+  shootingLine(
+    player.stats.lowPM + player.stats.highPM,
+    player.stats.lowPA + player.stats.highPA,
+  )
+
+const teamFieldGoalsLine = (team: Team): string =>
+  shootingLine(
+    teamStatTotal(team, 'lowPM') + teamStatTotal(team, 'highPM'),
+    teamStatTotal(team, 'lowPA') + teamStatTotal(team, 'highPA'),
+  )
+
 const teamColorClass = (teamId: TeamId): string =>
   teamId === 'A' ? 'team-a' : 'team-b'
 
@@ -1313,6 +1325,7 @@ function App() {
               <th>BLK</th>
               <th>REB</th>
               <th>TOV</th>
+              <th>FG</th>
             </tr>
           </thead>
           <tbody>
@@ -1327,6 +1340,7 @@ function App() {
                 <td>{player.stats.blk}</td>
                 <td>{player.stats.reb}</td>
                 <td>{player.stats.tov}</td>
+                <td>{playerFieldGoalsLine(player)}</td>
               </tr>
             ))}
             <tr className="total-row">
@@ -1349,6 +1363,7 @@ function App() {
               <td>{teamStatTotal(team, 'blk')}</td>
               <td>{teamStatTotal(team, 'reb')}</td>
               <td>{teamStatTotal(team, 'tov')}</td>
+              <td>{teamFieldGoalsLine(team)}</td>
             </tr>
           </tbody>
         </table>
@@ -1631,6 +1646,9 @@ function App() {
                     ))}
                   </div>
                   {shareTeams.map(renderTeamBoxScore)}
+                  <p className="shared-boxscore-scoring">
+                    Scoring: {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
+                  </p>
                 </div>
               </div>
             </section>

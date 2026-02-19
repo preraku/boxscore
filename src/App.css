@@ -583,7 +583,7 @@
 
 .stats-table th:nth-child(1),
 .stats-table td:nth-child(1) {
-  width: 30%;
+  width: 28%;
 }
 
 .stats-table th:first-child,
@@ -598,7 +598,7 @@
 
 .stats-table th:nth-child(n + 3),
 .stats-table td:nth-child(n + 3) {
-  width: 8.5%;
+  width: 7.75%;
 }
 
 .stats-table thead th {
@@ -623,6 +623,16 @@
 .total-row td {
   font-weight: 800;
   border-bottom: 0;
+}
+
+.shared-boxscore-scoring {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #556674;
+  text-align: right;
 }
 
 .share-sheet-backdrop {
