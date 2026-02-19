@@ -1,5 +1,13 @@
 import html2canvas from 'html2canvas'
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type TouchEvent as ReactTouchEvent,
+} from 'react'
 import './App.css'
 
 type TeamSize = 4 | 5
@@ -437,6 +445,55 @@ const shareCaptureSignature = (teams: Team[], scoringMode: ScoringMode): string 
     })),
   })
 
+const buildDefaultShareSelection = (teams: Team[]): Record<string, boolean> => {
+  const selection: Record<string, boolean> = {}
+
+  for (const team of teams) {
+    for (const player of team.players) {
+      selection[player.id] = true
+    }
+  }
+
+  return selection
+}
+
+const syncShareSelection = (
+  currentSelection: Record<string, boolean>,
+  teams: Team[],
+): Record<string, boolean> => {
+  const nextSelection: Record<string, boolean> = {}
+  let changed = false
+
+  for (const team of teams) {
+    for (const player of team.players) {
+      if (player.id in currentSelection) {
+        nextSelection[player.id] = currentSelection[player.id]
+      } else {
+        nextSelection[player.id] = true
+        changed = true
+      }
+    }
+  }
+
+  if (!changed) {
+    const currentIds = Object.keys(currentSelection)
+    const nextIds = Object.keys(nextSelection)
+
+    if (currentIds.length !== nextIds.length) {
+      changed = true
+    } else {
+      for (const playerId of currentIds) {
+        if (!(playerId in nextSelection)) {
+          changed = true
+          break
+        }
+      }
+    }
+  }
+
+  return changed ? nextSelection : currentSelection
+}
+
 const applyDelta = (
   currentStats: StatLine,
   delta: StatDelta,
@@ -485,7 +542,25 @@ function App() {
     null,
   )
   const [isSharing, setIsSharing] = useState(false)
+  const [isPreparingShareImage, setIsPreparingShareImage] = useState(false)
+  const [hasSharePrepareError, setHasSharePrepareError] = useState(false)
+  const [shareSelectionByPlayerId, setShareSelectionByPlayerId] = useState<
+    Record<string, boolean>
+  >(() => buildDefaultShareSelection(persistedState?.teams ?? []))
+  const [isShareOptionsOpen, setIsShareOptionsOpen] = useState(false)
+  const [shareSheetDragOffset, setShareSheetDragOffset] = useState(0)
+  const [isShareSheetDragging, setIsShareSheetDragging] = useState(false)
+  const [shareSheetTransitionMs, setShareSheetTransitionMs] = useState(220)
+  const [isShareSheetClosing, setIsShareSheetClosing] = useState(false)
   const sharedBoxScoreRef = useRef<HTMLDivElement | null>(null)
+  const shareSheetTeamListRef = useRef<HTMLDivElement | null>(null)
+  const shareSheetTouchStartYRef = useRef<number | null>(null)
+  const shareSheetTouchStartTimeRef = useRef<number | null>(null)
+  const shareSheetDismissTimeoutRef = useRef<number | null>(null)
+  const sharePrepareJobIdRef = useRef(0)
+  const shareSheetDragOffsetRef = useRef(0)
+  const shareSheetCanDragRef = useRef(false)
+  const shareSheetTouchStartedInListRef = useRef(false)
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId)
   const selectedPlayer = selectedTeam?.players.find(
@@ -493,6 +568,62 @@ function App() {
   )
   const currentScoringConfig = SCORING_CONFIG[gameScoringMode]
   const actionButtons = scoringActions(gameScoringMode)
+  const shareTeams = useMemo(
+    () =>
+      teams
+        .map((team) => ({
+          ...team,
+          players: team.players.filter(
+            (player) => shareSelectionByPlayerId[player.id] !== false,
+          ),
+        }))
+        .filter((team) => team.players.length > 0),
+    [teams, shareSelectionByPlayerId],
+  )
+  const totalSharePlayers = teams.reduce((total, team) => total + team.players.length, 0)
+  const selectedSharePlayers = shareTeams.reduce(
+    (total, team) => total + team.players.length,
+    0,
+  )
+  const currentShareSignature = useMemo(
+    () => shareCaptureSignature(shareTeams, gameScoringMode),
+    [shareTeams, gameScoringMode],
+  )
+  const isShareImageReady =
+    preparedShareImage?.signature === currentShareSignature
+  const isSheetShareReady =
+    selectedSharePlayers > 0 &&
+    !isPreparingShareImage &&
+    !isSharing &&
+    (isShareImageReady || hasSharePrepareError)
+  const shareStatusMessage =
+    teams.length > 0 && selectedSharePlayers === 0
+      ? 'Select at least one player in Share options.'
+      : shareStatus
+
+  const resetShareSheetDrag = () => {
+    if (shareSheetDismissTimeoutRef.current !== null) {
+      window.clearTimeout(shareSheetDismissTimeoutRef.current)
+      shareSheetDismissTimeoutRef.current = null
+    }
+    shareSheetTouchStartYRef.current = null
+    shareSheetTouchStartTimeRef.current = null
+    shareSheetCanDragRef.current = false
+    shareSheetTouchStartedInListRef.current = false
+    shareSheetDragOffsetRef.current = 0
+    setShareSheetTransitionMs(220)
+    setIsShareSheetClosing(false)
+    setShareSheetDragOffset(0)
+    setIsShareSheetDragging(false)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (shareSheetDismissTimeoutRef.current !== null) {
+        window.clearTimeout(shareSheetDismissTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     persistState({
@@ -522,7 +653,64 @@ function App() {
 
   useEffect(() => {
     setPreparedShareImage(null)
-  }, [teams, gameScoringMode])
+    setHasSharePrepareError(false)
+  }, [teams, gameScoringMode, shareSelectionByPlayerId])
+
+  useEffect(() => {
+    setShareSelectionByPlayerId((currentSelection) =>
+      syncShareSelection(currentSelection, teams),
+    )
+  }, [teams])
+
+  useEffect(() => {
+    if (!isShareOptionsOpen) {
+      shareSheetTouchStartYRef.current = null
+      shareSheetTouchStartTimeRef.current = null
+      shareSheetCanDragRef.current = false
+      shareSheetTouchStartedInListRef.current = false
+      shareSheetDragOffsetRef.current = 0
+      setShareSheetDragOffset(0)
+      setIsShareSheetDragging(false)
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsShareOptionsOpen(false)
+      }
+    }
+
+    const scrollY = window.scrollY
+    const originalBodyOverflow = document.body.style.overflow
+    const originalBodyPosition = document.body.style.position
+    const originalBodyTop = document.body.style.top
+    const originalBodyLeft = document.body.style.left
+    const originalBodyRight = document.body.style.right
+    const originalBodyWidth = document.body.style.width
+    const originalHtmlOverflow = document.documentElement.style.overflow
+
+    document.body.style.overflow = 'hidden'
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.left = '0'
+    document.body.style.right = '0'
+    document.body.style.width = '100%'
+    document.documentElement.style.overflow = 'hidden'
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.body.style.overflow = originalBodyOverflow
+      document.body.style.position = originalBodyPosition
+      document.body.style.top = originalBodyTop
+      document.body.style.left = originalBodyLeft
+      document.body.style.right = originalBodyRight
+      document.body.style.width = originalBodyWidth
+      document.documentElement.style.overflow = originalHtmlOverflow
+      window.scrollTo(0, scrollY)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isShareOptionsOpen])
 
   const updateTeamLabel = (teamId: TeamId, label: string) => {
     setSetup((currentSetup) => ({
@@ -570,6 +758,8 @@ function App() {
     setTeams(seededTeams)
     setSelectedTeamId(seededTeams[0].id)
     setSelectedPlayerId(seededTeams[0].players[0]?.id ?? '')
+    setShareSelectionByPlayerId(buildDefaultShareSelection(seededTeams))
+    closeShareOptions()
     setHistory([])
     setLastAction('Game started.')
     setPhase('game')
@@ -608,6 +798,7 @@ function App() {
     })
 
     setShareStatus('')
+    closeShareOptions()
     setPhase('editNames')
   }
 
@@ -635,6 +826,152 @@ function App() {
 
   const cancelEditNames = () => {
     setPhase('game')
+  }
+
+  const openShareOptions = () => {
+    if (teams.length === 0) {
+      return
+    }
+
+    resetShareSheetDrag()
+    setShareStatus('')
+    setHasSharePrepareError(false)
+    setShareSheetTransitionMs(220)
+    setIsShareOptionsOpen(true)
+  }
+
+  const closeShareOptions = () => {
+    sharePrepareJobIdRef.current += 1
+    setIsPreparingShareImage(false)
+    setHasSharePrepareError(false)
+    resetShareSheetDrag()
+    setIsShareOptionsOpen(false)
+  }
+
+  const handleShareSheetTouchStart = (event: ReactTouchEvent<HTMLElement>) => {
+    if (event.touches.length !== 1) {
+      return
+    }
+
+    const touchStartY = event.touches[0].clientY
+    const teamListElement = shareSheetTeamListRef.current
+    const targetNode = event.target as Node | null
+    const startedInList =
+      !!teamListElement && !!targetNode && teamListElement.contains(targetNode)
+
+    shareSheetTouchStartYRef.current = touchStartY
+    shareSheetTouchStartTimeRef.current = Date.now()
+    shareSheetTouchStartedInListRef.current = startedInList
+    shareSheetCanDragRef.current =
+      !startedInList || (teamListElement?.scrollTop ?? 0) <= 0
+  }
+
+  const handleShareSheetTouchMove = (event: ReactTouchEvent<HTMLElement>) => {
+    const touchStartY = shareSheetTouchStartYRef.current
+    if (touchStartY === null || event.touches.length !== 1) {
+      return
+    }
+
+    const nextOffset = Math.max(0, event.touches[0].clientY - touchStartY)
+    const teamListElement = shareSheetTeamListRef.current
+    if (
+      shareSheetTouchStartedInListRef.current &&
+      teamListElement &&
+      teamListElement.scrollTop > 0
+    ) {
+      shareSheetCanDragRef.current = false
+      return
+    }
+
+    shareSheetCanDragRef.current = true
+    if (nextOffset <= 0) {
+      return
+    }
+
+    if (event.cancelable) {
+      event.preventDefault()
+    }
+
+    if (!isShareSheetDragging) {
+      setIsShareSheetDragging(true)
+    }
+
+    shareSheetDragOffsetRef.current = nextOffset
+    setShareSheetDragOffset(nextOffset)
+  }
+
+  const handleShareSheetTouchEnd = () => {
+    if (shareSheetTouchStartYRef.current === null) {
+      return
+    }
+
+    const elapsedMs =
+      shareSheetTouchStartTimeRef.current === null
+        ? Number.POSITIVE_INFINITY
+        : Date.now() - shareSheetTouchStartTimeRef.current
+    const dragDistance = shareSheetDragOffsetRef.current
+    const shouldDismiss = dragDistance > 64 || (dragDistance > 28 && elapsedMs < 220)
+    if (shouldDismiss) {
+      const exitOffset = Math.max(window.innerHeight + 64, dragDistance + 220)
+      const remainingDistance = Math.max(0, exitOffset - dragDistance)
+      const dismissDurationMs = Math.min(
+        1020,
+        Math.max(540, Math.round(remainingDistance / 0.8)),
+      )
+      setIsShareSheetDragging(false)
+      setIsShareSheetClosing(true)
+      setShareSheetTransitionMs(dismissDurationMs)
+      shareSheetDragOffsetRef.current = exitOffset
+      setShareSheetDragOffset(exitOffset)
+      shareSheetDismissTimeoutRef.current = window.setTimeout(() => {
+        shareSheetDismissTimeoutRef.current = null
+        setIsShareOptionsOpen(false)
+      }, dismissDurationMs)
+      return
+    }
+
+    resetShareSheetDrag()
+  }
+
+  const toggleSharePlayer = (playerId: string) => {
+    setShareStatus('')
+    setShareSelectionByPlayerId((currentSelection) => {
+      const currentlySelected = currentSelection[playerId] !== false
+      return {
+        ...currentSelection,
+        [playerId]: !currentlySelected,
+      }
+    })
+  }
+
+  const setShareSelectionForAllPlayers = (isSelected: boolean) => {
+    setShareStatus('')
+    setShareSelectionByPlayerId((currentSelection) => {
+      const nextSelection = { ...currentSelection }
+
+      for (const team of teams) {
+        for (const player of team.players) {
+          nextSelection[player.id] = isSelected
+        }
+      }
+
+      return nextSelection
+    })
+  }
+
+  const setShareSelectionForTeamOnly = (teamId: TeamId) => {
+    setShareStatus('')
+    setShareSelectionByPlayerId((currentSelection) => {
+      const nextSelection = { ...currentSelection }
+
+      for (const team of teams) {
+        for (const player of team.players) {
+          nextSelection[player.id] = team.id === teamId
+        }
+      }
+
+      return nextSelection
+    })
   }
 
   const selectPlayerTarget = (teamId: TeamId, playerId: string) => {
@@ -715,43 +1052,147 @@ function App() {
     URL.revokeObjectURL(blobUrl)
   }
 
+  const prepareShareImage = useCallback(
+    async (): Promise<{
+      imageFile: File
+      signature: string
+      usedPreparedImage: boolean
+    }> => {
+      if (!sharedBoxScoreRef.current) {
+        throw new Error('Could not prepare share image.')
+      }
+
+      const signature = currentShareSignature
+      if (preparedShareImage?.signature === signature) {
+        return {
+          imageFile: preparedShareImage.file,
+          signature,
+          usedPreparedImage: true,
+        }
+      }
+
+      const canvas = await html2canvas(sharedBoxScoreRef.current, {
+        backgroundColor: '#ffffff',
+        scale: Math.max(window.devicePixelRatio || 1, 2),
+      })
+
+      const imageBlob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/png')
+      })
+
+      if (!imageBlob) {
+        throw new Error('Could not generate screenshot image.')
+      }
+
+      const matchupLabel = shareTeams
+        .map((team) => team.label.trim().replace(/\s+/g, '-').toLowerCase())
+        .join('-vs-')
+      const filename = `${matchupLabel || 'game'}-box-score.png`
+      const imageFile = new File([imageBlob], filename, { type: 'image/png' })
+      return {
+        imageFile,
+        signature,
+        usedPreparedImage: false,
+      }
+    },
+    [currentShareSignature, preparedShareImage, shareTeams],
+  )
+
+  useEffect(() => {
+    if (!isShareOptionsOpen || shareTeams.length === 0) {
+      setIsPreparingShareImage(false)
+      if (!isShareOptionsOpen) {
+        setHasSharePrepareError(false)
+      }
+      return
+    }
+
+    if (preparedShareImage?.signature === currentShareSignature) {
+      setIsPreparingShareImage(false)
+      setHasSharePrepareError(false)
+      return
+    }
+
+    const prepareJobId = ++sharePrepareJobIdRef.current
+
+    const prepareInBackground = async () => {
+      try {
+        setIsPreparingShareImage(true)
+        setHasSharePrepareError(false)
+        const preparedImage = await prepareShareImage()
+        if (sharePrepareJobIdRef.current !== prepareJobId) {
+          return
+        }
+
+        if (!preparedImage.usedPreparedImage) {
+          setPreparedShareImage({
+            signature: preparedImage.signature,
+            file: preparedImage.imageFile,
+          })
+        }
+        setHasSharePrepareError(false)
+      } catch (error) {
+        if (sharePrepareJobIdRef.current !== prepareJobId) {
+          return
+        }
+
+        setHasSharePrepareError(true)
+        const normalizedError =
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : { value: error }
+        console.error('[prepareShareImage] Background preparation failed.', {
+          error: normalizedError,
+          secureContext: window.isSecureContext,
+          visibilityState: document.visibilityState,
+        })
+      } finally {
+        if (sharePrepareJobIdRef.current === prepareJobId) {
+          setIsPreparingShareImage(false)
+        }
+      }
+    }
+
+    void prepareInBackground()
+  }, [
+    isShareOptionsOpen,
+    shareTeams.length,
+    currentShareSignature,
+    preparedShareImage?.signature,
+    prepareShareImage,
+  ])
+
   const shareBoxScore = async () => {
     if (teams.length === 0 || !sharedBoxScoreRef.current || isSharing) {
+      return
+    }
+
+    if (shareTeams.length === 0) {
+      setShareStatus('Select at least one player to share.')
       return
     }
 
     let shareDebugContext: Record<string, unknown> | undefined
     let imageFile: File | null = null
     let usedPreparedImage = false
-    const captureSignature = shareCaptureSignature(teams, gameScoringMode)
 
     try {
       setIsSharing(true)
       setShareStatus('')
+      setHasSharePrepareError(false)
 
-      if (preparedShareImage?.signature === captureSignature) {
-        imageFile = preparedShareImage.file
-        usedPreparedImage = true
-      } else {
-        const canvas = await html2canvas(sharedBoxScoreRef.current, {
-          backgroundColor: '#ffffff',
-          scale: Math.max(window.devicePixelRatio || 1, 2),
+      const preparedImage = await prepareShareImage()
+      imageFile = preparedImage.imageFile
+      usedPreparedImage = preparedImage.usedPreparedImage
+      if (!preparedImage.usedPreparedImage) {
+        setPreparedShareImage({
+          signature: preparedImage.signature,
+          file: preparedImage.imageFile,
         })
-
-        const imageBlob = await new Promise<Blob | null>((resolve) => {
-          canvas.toBlob(resolve, 'image/png')
-        })
-
-        if (!imageBlob) {
-          throw new Error('Could not generate screenshot image.')
-        }
-
-        const matchupLabel = teams
-          .map((team) => team.label.trim().replace(/\s+/g, '-').toLowerCase())
-          .join('-vs-')
-        const filename = `${matchupLabel || 'game'}-box-score.png`
-        imageFile = new File([imageBlob], filename, { type: 'image/png' })
-        setPreparedShareImage({ signature: captureSignature, file: imageFile })
       }
 
       if (!imageFile) {
@@ -759,7 +1200,7 @@ function App() {
       }
 
       const sharePayload = {
-        title: `${teams.map((team) => team.label).join(' vs ')} Box Score`,
+        title: `${shareTeams.map((team) => team.label).join(' vs ')} Box Score`,
         files: [imageFile],
       }
       const canSharePayload = navigator.canShare?.(sharePayload) ?? false
@@ -795,6 +1236,9 @@ function App() {
       }
     } catch (error) {
       const errorName = error instanceof Error ? error.name : ''
+      if (imageFile === null) {
+        setHasSharePrepareError(true)
+      }
       const normalizedError =
         error instanceof Error
           ? {
@@ -832,11 +1276,21 @@ function App() {
     }
   }
 
+  const shareFromShareOptions = () => {
+    if (!isSheetShareReady) {
+      return
+    }
+
+    closeShareOptions()
+    void shareBoxScore()
+  }
+
   const backToSetup = () => {
     setPhase('setup')
     setLastAction('')
     setHistory([])
     setShareStatus('')
+    closeShareOptions()
   }
 
   const showSetup = phase === 'setup' || teams.length === 0
@@ -1118,29 +1572,39 @@ function App() {
             </section>
 
             <section className="panel table-panel">
+              <div className="onscreen-boxscore">{teams.map(renderTeamBoxScore)}</div>
+
               <div className="table-actions">
-                <button
-                  type="button"
-                  className="share-button"
-                  onClick={shareBoxScore}
-                  disabled={teams.length === 0 || isSharing}
-                >
-                  {isSharing
-                    ? 'Preparing Image...'
-                    : preparedShareImage
-                      ? 'Share Box Score (Ready)'
-                      : 'Share Box Score'}
-                </button>
+                <div className="share-action-row">
+                  <button
+                    type="button"
+                    className="share-button"
+                    onClick={openShareOptions}
+                    disabled={teams.length === 0}
+                  >
+                    Share Box Score
+                  </button>
+                </div>
+                {totalSharePlayers > 0 ? (
+                  <p className="share-selection-copy">
+                    {selectedSharePlayers} of {totalSharePlayers} players selected
+                  </p>
+                ) : null}
               </div>
 
-              {shareStatus ? <p className="share-status">{shareStatus}</p> : null}
-
-              <div className="onscreen-boxscore">{teams.map(renderTeamBoxScore)}</div>
+              {shareStatusMessage ? <p className="share-status">{shareStatusMessage}</p> : null}
 
               <div className="share-capture-root" aria-hidden="true">
                 <div className="shared-boxscore" ref={sharedBoxScoreRef}>
-                  <div className="game-score-strip">
-                    {teams.map((team) => (
+                  <div
+                    className="game-score-strip"
+                    style={
+                      {
+                        '--team-count': Math.max(shareTeams.length, 1),
+                      } as CSSProperties
+                    }
+                  >
+                    {shareTeams.map((team) => (
                       <div
                         key={team.id}
                         className={`game-score-team ${teamColorClass(team.id)}`}
@@ -1150,10 +1614,125 @@ function App() {
                       </div>
                     ))}
                   </div>
-                  {teams.map(renderTeamBoxScore)}
+                  {shareTeams.map(renderTeamBoxScore)}
                 </div>
               </div>
             </section>
+
+            {isShareOptionsOpen ? (
+              <div
+                className="share-sheet-backdrop"
+                role="presentation"
+                onClick={closeShareOptions}
+              >
+                <section
+                  className="share-sheet"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Share options"
+                  style={
+                    shareSheetDragOffset > 0
+                      ? {
+                          transform: `translateY(${shareSheetDragOffset}px)`,
+                          transition: isShareSheetDragging
+                            ? 'none'
+                            : isShareSheetClosing
+                              ? `transform ${shareSheetTransitionMs}ms ease-out`
+                              : `transform ${shareSheetTransitionMs}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+                        }
+                      : undefined
+                  }
+                  onClick={(event) => event.stopPropagation()}
+                  onTouchStart={handleShareSheetTouchStart}
+                  onTouchMove={handleShareSheetTouchMove}
+                  onTouchEnd={handleShareSheetTouchEnd}
+                  onTouchCancel={handleShareSheetTouchEnd}
+                >
+                  <div className="share-sheet-handle" />
+                  <header className="share-sheet-header">
+                    <h3>Share options</h3>
+                    <button
+                      type="button"
+                      className="share-sheet-close"
+                      onClick={closeShareOptions}
+                    >
+                      Close
+                    </button>
+                  </header>
+                  <p className="share-sheet-count">
+                    {selectedSharePlayers} of {totalSharePlayers} players selected
+                  </p>
+
+                  <div className="share-sheet-quick-actions">
+                    <button
+                      type="button"
+                      className="share-chip"
+                      onClick={() => setShareSelectionForAllPlayers(true)}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      className="share-chip"
+                      onClick={() => setShareSelectionForAllPlayers(false)}
+                    >
+                      None
+                    </button>
+                    {teams.map((team) => (
+                      <button
+                        key={team.id}
+                        type="button"
+                        className="share-chip"
+                        onClick={() => setShareSelectionForTeamOnly(team.id)}
+                      >
+                        {team.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="share-sheet-team-list" ref={shareSheetTeamListRef}>
+                    {teams.map((team) => (
+                      <section className="share-team-group" key={team.id}>
+                        <p className="share-team-heading">{team.label}</p>
+                        <div className="share-player-checklist">
+                          {team.players.map((player) => (
+                            <label className="share-player-option" key={player.id}>
+                              <input
+                                type="checkbox"
+                                checked={shareSelectionByPlayerId[player.id] !== false}
+                                onChange={() => toggleSharePlayer(player.id)}
+                              />
+                              <span>{player.name}</span>
+                              <small>{playerPoints(player, gameScoringMode)} pts</small>
+                            </label>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+
+                  <div className="share-sheet-footer">
+                    <button
+                      type="button"
+                      className={`primary-button share-apply-button share-sheet-share-button${
+                        isSheetShareReady ? ' ready' : ''
+                      }`}
+                      onClick={shareFromShareOptions}
+                      disabled={!isSheetShareReady}
+                    >
+                      {selectedSharePlayers > 0 && isPreparingShareImage ? (
+                        <>
+                          <span className="share-spinner" aria-hidden="true" />
+                          <span>Preparing</span>
+                        </>
+                      ) : (
+                        'Share'
+                      )}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
           </>
         )}
       </div>
