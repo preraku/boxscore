@@ -147,11 +147,42 @@
   gap: 0.45rem;
 }
 
+.name-input-wrap {
+  position: relative;
+}
+
+.name-input-wrap .text-input {
+  padding-right: 2.5rem;
+}
+
 .name-field > span {
   font-size: 0.7rem;
   color: #5f6d7a;
   font-weight: 700;
   text-align: right;
+}
+
+.clear-name-button {
+  position: absolute;
+  right: 0.28rem;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 1.72rem;
+  width: 1.72rem;
+  border: 1px solid rgba(17, 33, 50, 0.18);
+  border-radius: 0.52rem;
+  background: rgba(255, 255, 255, 0.96);
+  color: #516171;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.clear-name-button:focus-visible {
+  outline: 2px solid rgba(51, 126, 180, 0.45);
+  outline-offset: 1px;
 }
 
 .primary-button {

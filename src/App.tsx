@@ -1436,19 +1436,35 @@ function App() {
                     </div>
 
                     <div className="name-grid">
-                      {Array.from({ length: playerCount }, (_, index) => (
-                        <label className="name-field" key={`${teamId}-${index + 1}`}>
-                          <span>P{index + 1}</span>
-                          <input
-                            className="text-input"
-                            placeholder="Optional"
-                            value={team.names[index] ?? ''}
-                            onChange={(event) =>
-                              updatePlayerName(teamId, index, event.target.value)
-                            }
-                          />
-                        </label>
-                      ))}
+                      {Array.from({ length: playerCount }, (_, index) => {
+                        const playerName = team.names[index] ?? ''
+
+                        return (
+                          <label className="name-field" key={`${teamId}-${index + 1}`}>
+                            <span>P{index + 1}</span>
+                            <div className="name-input-wrap">
+                              <input
+                                className="text-input"
+                                placeholder="Optional"
+                                value={playerName}
+                                onChange={(event) =>
+                                  updatePlayerName(teamId, index, event.target.value)
+                                }
+                              />
+                              {playerName ? (
+                                <button
+                                  type="button"
+                                  className="clear-name-button"
+                                  aria-label={`Clear P${index + 1} name`}
+                                  onClick={() => updatePlayerName(teamId, index, '')}
+                                >
+                                  X
+                                </button>
+                              ) : null}
+                            </div>
+                          </label>
+                        )
+                      })}
                     </div>
                   </article>
                 )
