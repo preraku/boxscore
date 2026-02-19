@@ -485,12 +485,16 @@
   gap: 0.6rem;
 }
 
-.share-capture-root {
+.share-capture-portal-root {
   position: fixed;
   left: -10000px;
-  top: 0;
+  top: -10000px;
   width: 34rem;
   pointer-events: none;
+}
+
+.share-capture-root {
+  width: 100%;
 }
 
 .shared-boxscore {

@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type TouchEvent as ReactTouchEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import './App.css'
 
 type TeamSize = 4 | 5
@@ -656,6 +657,8 @@ function App() {
   const [isShareSheetDragging, setIsShareSheetDragging] = useState(false)
   const [shareSheetTransitionMs, setShareSheetTransitionMs] = useState(220)
   const [isShareSheetClosing, setIsShareSheetClosing] = useState(false)
+  const [shareCapturePortalRoot, setShareCapturePortalRoot] =
+    useState<HTMLDivElement | null>(null)
   const sharedBoxScoreRef = useRef<HTMLDivElement | null>(null)
   const shareSheetTeamListRef = useRef<HTMLDivElement | null>(null)
   const shareSheetTouchStartYRef = useRef<number | null>(null)
@@ -727,6 +730,18 @@ function App() {
       if (shareSheetDismissTimeoutRef.current !== null) {
         window.clearTimeout(shareSheetDismissTimeoutRef.current)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    const portalRoot = document.createElement('div')
+    portalRoot.className = 'share-capture-portal-root'
+    portalRoot.setAttribute('aria-hidden', 'true')
+    document.body.append(portalRoot)
+    setShareCapturePortalRoot(portalRoot)
+
+    return () => {
+      portalRoot.remove()
     }
   }, [])
 
@@ -1746,40 +1761,45 @@ function App() {
 
               {shareStatusMessage ? <p className="share-status">{shareStatusMessage}</p> : null}
 
-              <div className="share-capture-root" aria-hidden="true">
-                <div className="shared-boxscore" ref={sharedBoxScoreRef}>
-                  <div
-                    className="game-score-strip"
-                    style={
-                      {
-                        '--team-count': Math.max(shareTeams.length, 1),
-                      } as CSSProperties
-                    }
-                  >
-                    {shareTeams.map((team) => (
-                      <div
-                        key={team.id}
-                        className={`game-score-team ${teamColorClass(team.id)}`}
-                      >
-                        <span>{team.label}</span>
-                        <strong>{teamPoints(team, gameScoringMode)}</strong>
+              {shareCapturePortalRoot
+                ? createPortal(
+                    <div className="share-capture-root" aria-hidden="true">
+                      <div className="shared-boxscore" ref={sharedBoxScoreRef}>
+                        <div
+                          className="game-score-strip"
+                          style={
+                            {
+                              '--team-count': Math.max(shareTeams.length, 1),
+                            } as CSSProperties
+                          }
+                        >
+                          {shareTeams.map((team) => (
+                            <div
+                              key={team.id}
+                              className={`game-score-team ${teamColorClass(team.id)}`}
+                            >
+                              <span>{team.label}</span>
+                              <strong>{teamPoints(team, gameScoringMode)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        {shareTeams.map(renderTeamBoxScore)}
+                        <div className="shared-boxscore-footer">
+                          <p className="shared-boxscore-scoring">
+                            Format: {playersPerTeam}v{playersPerTeam},{' '}
+                            {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
+                          </p>
+                          {SHARED_BOX_SCORE_GLOSSARY_LINE ? (
+                            <p className="shared-boxscore-definitions">
+                              Definitions: {SHARED_BOX_SCORE_GLOSSARY_LINE}
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                  {shareTeams.map(renderTeamBoxScore)}
-                  <div className="shared-boxscore-footer">
-                    <p className="shared-boxscore-scoring">
-                      Format: {playersPerTeam}v{playersPerTeam},{' '}
-                      {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
-                    </p>
-                    {SHARED_BOX_SCORE_GLOSSARY_LINE ? (
-                      <p className="shared-boxscore-definitions">
-                        Definitions: {SHARED_BOX_SCORE_GLOSSARY_LINE}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
+                    </div>,
+                    shareCapturePortalRoot,
+                  )
+                : null}
             </section>
 
             {isShareOptionsOpen ? (
