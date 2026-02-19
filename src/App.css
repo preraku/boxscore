@@ -583,7 +583,7 @@
 
 .stats-table th:nth-child(1),
 .stats-table td:nth-child(1) {
-  width: 28%;
+  width: 26%;
 }
 
 .stats-table th:first-child,
@@ -598,7 +598,7 @@
 
 .stats-table th:nth-child(n + 3),
 .stats-table td:nth-child(n + 3) {
-  width: 7.75%;
+  width: 7.1%;
 }
 
 .stats-table thead th {
@@ -606,6 +606,69 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #5d6a77;
+}
+
+.stat-term {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.stat-term-trigger {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.14em;
+}
+
+.stat-term-trigger:active {
+  transform: none;
+}
+
+.stat-term-trigger:focus-visible {
+  outline: 2px solid rgba(31, 132, 199, 0.45);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.stat-term-tooltip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 0.35rem);
+  transform: translate(-50%, 0.18rem);
+  background: rgba(17, 33, 50, 0.95);
+  color: #ffffff;
+  border-radius: 0.35rem;
+  padding: 0.26rem 0.42rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 6px 14px rgba(17, 33, 50, 0.22);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.stat-term:hover .stat-term-tooltip,
+.stat-term:focus-within .stat-term-tooltip,
+.stat-term.open .stat-term-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .stats-table tbody tr:nth-child(odd) {
@@ -625,12 +688,26 @@
   border-bottom: 0;
 }
 
+.shared-boxscore-footer {
+  display: grid;
+  gap: 0.16rem;
+}
+
 .shared-boxscore-scoring {
   margin: 0;
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  color: #556674;
+  text-align: right;
+}
+
+.shared-boxscore-definitions {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: #556674;
   text-align: right;
 }

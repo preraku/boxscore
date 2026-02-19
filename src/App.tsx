@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas'
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -24,6 +25,7 @@ type StatKey =
   | 'blk'
   | 'reb'
   | 'tov'
+  | 'tovf'
 
 type StatLine = {
   lowPA: number
@@ -35,6 +37,7 @@ type StatLine = {
   blk: number
   reb: number
   tov: number
+  tovf: number
 }
 
 type StatDelta = Partial<Record<StatKey, number>>
@@ -91,6 +94,11 @@ type PreparedShareImage = {
   file: File
 }
 
+type StatGlossaryTerm = {
+  abbreviation: string
+  definition: string
+}
+
 const TEAM_IDS: TeamId[] = ['A', 'B']
 const STAT_KEYS: StatKey[] = [
   'lowPA',
@@ -102,6 +110,7 @@ const STAT_KEYS: StatKey[] = [
   'blk',
   'reb',
   'tov',
+  'tovf',
 ]
 
 const SCORING_CONFIG: Record<
@@ -129,6 +138,73 @@ const SCORING_CONFIG: Record<
 
 const STORAGE_KEY = 'boxscore:state:v1'
 const MAX_PLAYERS_PER_TEAM = 5
+const BOX_SCORE_STAT_GLOSSARY: StatGlossaryTerm[] = [
+  { abbreviation: 'TOVF', definition: 'Turnovers Forced' },
+]
+const BOX_SCORE_STAT_DEFINITION_BY_ABBREVIATION = new Map(
+  BOX_SCORE_STAT_GLOSSARY.map((term) => [term.abbreviation, term.definition]),
+)
+const SHARED_BOX_SCORE_GLOSSARY_LINE = BOX_SCORE_STAT_GLOSSARY.map(
+  (term) => `${term.abbreviation} = ${term.definition}`,
+).join(' | ')
+
+type StatHeaderTermProps = {
+  abbreviation: string
+  definition: string
+}
+
+const StatHeaderTerm = ({ abbreviation, definition }: StatHeaderTermProps) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const termRef = useRef<HTMLSpanElement | null>(null)
+  const tooltipId = useId()
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const targetNode = event.target as Node | null
+      if (!termRef.current || (targetNode && termRef.current.contains(targetNode))) {
+        return
+      }
+
+      setIsOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isOpen])
+
+  return (
+    <span className={`stat-term${isOpen ? ' open' : ''}`} ref={termRef}>
+      <button
+        type="button"
+        className="stat-term-trigger"
+        aria-describedby={isOpen ? tooltipId : undefined}
+        aria-expanded={isOpen}
+        aria-label={`${abbreviation}: ${definition}`}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        {abbreviation}
+      </button>
+      <span id={tooltipId} role="tooltip" className="stat-term-tooltip">
+        {abbreviation} = {definition}
+      </span>
+    </span>
+  )
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -188,6 +264,7 @@ const scoringActions = (mode: ScoringMode): ActionDefinition[] => {
     { id: 'blk', label: 'BLK', short: 'BLK', tone: 'event', delta: { blk: 1 } },
     { id: 'reb', label: 'REB', short: 'REB', tone: 'event', delta: { reb: 1 } },
     { id: 'tov', label: 'TOV', short: 'TOV', tone: 'event', delta: { tov: 1 } },
+    { id: 'tovf', label: 'TOVF', short: 'TOVF', tone: 'event', delta: { tovf: 1 } },
   ]
 }
 
@@ -201,6 +278,7 @@ const blankStatLine = (): StatLine => ({
   blk: 0,
   reb: 0,
   tov: 0,
+  tovf: 0,
 })
 
 const createSetupTeam = (label: string): SetupTeam => ({
@@ -226,6 +304,7 @@ const normalizeStatLine = (value: unknown): StatLine => {
     blk: clampToZero(safeNumber(source.blk)),
     reb: clampToZero(safeNumber(source.reb)),
     tov: clampToZero(safeNumber(source.tov)),
+    tovf: clampToZero(safeNumber(source.tovf)),
   }
 }
 
@@ -1307,6 +1386,15 @@ function App() {
 
   const showSetup = phase === 'setup' || teams.length === 0
   const showEditNames = phase === 'editNames' && teams.length > 0
+  const renderStatHeaderLabel = (abbreviation: string) => {
+    const definition = BOX_SCORE_STAT_DEFINITION_BY_ABBREVIATION.get(abbreviation)
+    if (!definition) {
+      return abbreviation
+    }
+
+    return <StatHeaderTerm abbreviation={abbreviation} definition={definition} />
+  }
+
   const renderTeamBoxScore = (team: Team) => (
     <article className="team-boxscore" key={team.id}>
       <h3 className={`team-boxscore-title ${teamColorClass(team.id)}`}>
@@ -1325,6 +1413,7 @@ function App() {
               <th>BLK</th>
               <th>REB</th>
               <th>TOV</th>
+              <th>{renderStatHeaderLabel('TOVF')}</th>
               <th>FG</th>
             </tr>
           </thead>
@@ -1340,6 +1429,7 @@ function App() {
                 <td>{player.stats.blk}</td>
                 <td>{player.stats.reb}</td>
                 <td>{player.stats.tov}</td>
+                <td>{player.stats.tovf}</td>
                 <td>{playerFieldGoalsLine(player)}</td>
               </tr>
             ))}
@@ -1363,6 +1453,7 @@ function App() {
               <td>{teamStatTotal(team, 'blk')}</td>
               <td>{teamStatTotal(team, 'reb')}</td>
               <td>{teamStatTotal(team, 'tov')}</td>
+              <td>{teamStatTotal(team, 'tovf')}</td>
               <td>{teamFieldGoalsLine(team)}</td>
             </tr>
           </tbody>
@@ -1646,9 +1737,16 @@ function App() {
                     ))}
                   </div>
                   {shareTeams.map(renderTeamBoxScore)}
-                  <p className="shared-boxscore-scoring">
-                    Scoring: {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
-                  </p>
+                  <div className="shared-boxscore-footer">
+                    <p className="shared-boxscore-scoring">
+                      Scoring: {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
+                    </p>
+                    {SHARED_BOX_SCORE_GLOSSARY_LINE ? (
+                      <p className="shared-boxscore-definitions">
+                        Definitions: {SHARED_BOX_SCORE_GLOSSARY_LINE}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </section>
