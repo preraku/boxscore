@@ -138,6 +138,19 @@ const SCORING_CONFIG: Record<
 
 const STORAGE_KEY = 'boxscore:state:v1'
 const MAX_PLAYERS_PER_TEAM = 5
+
+const isDefaultPlayerName = (name: string): boolean => {
+  const trimmedName = name.trim()
+
+  for (let index = 1; index <= MAX_PLAYERS_PER_TEAM; index += 1) {
+    if (trimmedName === `P${index}`) {
+      return true
+    }
+  }
+
+  return false
+}
+
 const BOX_SCORE_STAT_GLOSSARY: StatGlossaryTerm[] = [
   { abbreviation: 'TOVF', definition: 'Turnovers Forced' },
 ]
@@ -658,6 +671,7 @@ function App() {
     (player) => player.id === selectedPlayerId,
   )
   const currentScoringConfig = SCORING_CONFIG[gameScoringMode]
+  const playersPerTeam = teams[0]?.players.length ?? playerCount
   const actionButtons = scoringActions(gameScoringMode)
   const shareTeams = useMemo(
     () =>
@@ -1058,6 +1072,21 @@ function App() {
       for (const team of teams) {
         for (const player of team.players) {
           nextSelection[player.id] = team.id === teamId
+        }
+      }
+
+      return nextSelection
+    })
+  }
+
+  const setShareSelectionForNamedPlayersOnly = () => {
+    setShareStatus('')
+    setShareSelectionByPlayerId((currentSelection) => {
+      const nextSelection = { ...currentSelection }
+
+      for (const team of teams) {
+        for (const player of team.players) {
+          nextSelection[player.id] = !isDefaultPlayerName(player.name)
         }
       }
 
@@ -1561,6 +1590,7 @@ function App() {
                                 <button
                                   type="button"
                                   className="clear-name-button"
+                                  tabIndex={-1}
                                   aria-label={`Clear P${index + 1} name`}
                                   onClick={() => updatePlayerName(teamId, index, '')}
                                 >
@@ -1739,7 +1769,8 @@ function App() {
                   {shareTeams.map(renderTeamBoxScore)}
                   <div className="shared-boxscore-footer">
                     <p className="shared-boxscore-scoring">
-                      Scoring: {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
+                      Format: {playersPerTeam}v{playersPerTeam},{' '}
+                      {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
                     </p>
                     {SHARED_BOX_SCORE_GLOSSARY_LINE ? (
                       <p className="shared-boxscore-definitions">
@@ -1809,6 +1840,13 @@ function App() {
                       onClick={() => setShareSelectionForAllPlayers(false)}
                     >
                       None
+                    </button>
+                    <button
+                      type="button"
+                      className="share-chip"
+                      onClick={setShareSelectionForNamedPlayersOnly}
+                    >
+                      Named Only
                     </button>
                     {teams.map((team) => (
                       <button
