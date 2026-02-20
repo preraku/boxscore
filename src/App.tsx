@@ -1,622 +1,49 @@
 import html2canvas from 'html2canvas'
 import {
+  type TouchEvent as ReactTouchEvent,
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type TouchEvent as ReactTouchEvent,
 } from 'react'
-import { createPortal } from 'react-dom'
 import './App.css'
-
-type TeamSize = 4 | 5
-type TeamId = 'A' | 'B'
-type ScoringMode = 'twosAndThrees' | 'onesAndTwos'
-type Phase = 'setup' | 'game' | 'editNames'
-type StatKey =
-  | 'lowPA'
-  | 'lowPM'
-  | 'highPA'
-  | 'highPM'
-  | 'ast'
-  | 'stl'
-  | 'blk'
-  | 'reb'
-  | 'tov'
-  | 'tovf'
-
-type StatLine = {
-  lowPA: number
-  lowPM: number
-  highPA: number
-  highPM: number
-  ast: number
-  stl: number
-  blk: number
-  reb: number
-  tov: number
-  tovf: number
-}
-
-type StatDelta = Partial<Record<StatKey, number>>
-
-type Player = {
-  id: string
-  name: string
-  stats: StatLine
-}
-
-type Team = {
-  id: TeamId
-  label: string
-  players: Player[]
-}
-
-type SetupTeam = {
-  label: string
-  names: string[]
-}
-
-type ActionTone = 'make' | 'miss' | 'event'
-
-type ActionDefinition = {
-  id: string
-  label: string
-  short: string
-  tone: ActionTone
-  delta: StatDelta
-}
-
-type LoggedAction = {
-  teamId: TeamId
-  playerId: string
-  delta: StatDelta
-  label: string
-}
-
-type PersistedState = {
-  phase: Phase
-  playerCount: TeamSize
-  setupScoringMode: ScoringMode
-  gameScoringMode: ScoringMode
-  setup: Record<TeamId, SetupTeam>
-  teams: Team[]
-  selectedTeamId: TeamId
-  selectedPlayerId: string
-  history: LoggedAction[]
-  lastAction: string
-}
-
-type PreparedShareImage = {
-  signature: string
-  file: File
-}
-
-type StatGlossaryTerm = {
-  abbreviation: string
-  definition: string
-}
-
-const TEAM_IDS: TeamId[] = ['A', 'B']
-const STAT_KEYS: StatKey[] = [
-  'lowPA',
-  'lowPM',
-  'highPA',
-  'highPM',
-  'ast',
-  'stl',
-  'blk',
-  'reb',
-  'tov',
-  'tovf',
-]
-
-const SCORING_CONFIG: Record<
+import { ControlPanel } from './app/components/ControlPanel'
+import { ScorePanel } from './app/components/ScorePanel'
+import { SetupPanel } from './app/components/SetupPanel'
+import { SharedBoxScorePortal } from './app/components/SharedBoxScorePortal'
+import { ShareOptionsSheet } from './app/components/ShareOptionsSheet'
+import { TeamBoxScore } from './app/components/TeamBoxScore'
+import { TEAM_IDS } from './app/constants'
+import { defaultSetup } from './app/setup'
+import { loadPersistedState, persistState } from './app/storage'
+import type {
+  ActionDefinition,
+  LoggedAction,
+  PersistedState,
+  Phase,
+  PreparedShareImage,
   ScoringMode,
-  {
-    lowLabel: string
-    highLabel: string
-    lowPoints: number
-    highPoints: number
-  }
-> = {
-  twosAndThrees: {
-    lowLabel: '2P',
-    highLabel: '3P',
-    lowPoints: 2,
-    highPoints: 3,
-  },
-  onesAndTwos: {
-    lowLabel: '1P',
-    highLabel: '2P',
-    lowPoints: 1,
-    highPoints: 2,
-  },
-}
-
-const STORAGE_KEY = 'boxscore:state:v1'
-const MAX_PLAYERS_PER_TEAM = 5
-
-const isDefaultPlayerName = (name: string): boolean => {
-  const trimmedName = name.trim()
-
-  for (let index = 1; index <= MAX_PLAYERS_PER_TEAM; index += 1) {
-    if (trimmedName === `P${index}`) {
-      return true
-    }
-  }
-
-  return false
-}
-
-const BOX_SCORE_STAT_GLOSSARY: StatGlossaryTerm[] = [
-  { abbreviation: 'TOVF', definition: 'Turnovers Forced' },
-]
-const BOX_SCORE_STAT_DEFINITION_BY_ABBREVIATION = new Map(
-  BOX_SCORE_STAT_GLOSSARY.map((term) => [term.abbreviation, term.definition]),
-)
-const SHARED_BOX_SCORE_GLOSSARY_LINE = BOX_SCORE_STAT_GLOSSARY.map(
-  (term) => `${term.abbreviation} = ${term.definition}`,
-).join(' | ')
-
-type StatHeaderTermProps = {
-  abbreviation: string
-  definition: string
-}
-
-const StatHeaderTerm = ({ abbreviation, definition }: StatHeaderTermProps) => {
-  const [isOpen, setIsOpen] = useState(false)
-  const termRef = useRef<HTMLSpanElement | null>(null)
-  const tooltipId = useId()
-
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const targetNode = event.target as Node | null
-      if (!termRef.current || (targetNode && termRef.current.contains(targetNode))) {
-        return
-      }
-
-      setIsOpen(false)
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsOpen(false)
-      }
-    }
-
-    window.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen])
-
-  return (
-    <span className={`stat-term${isOpen ? ' open' : ''}`} ref={termRef}>
-      <button
-        type="button"
-        className="stat-term-trigger"
-        aria-describedby={isOpen ? tooltipId : undefined}
-        aria-expanded={isOpen}
-        aria-label={`${abbreviation}: ${definition}`}
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        {abbreviation}
-      </button>
-      <span id={tooltipId} role="tooltip" className="stat-term-tooltip">
-        {abbreviation} = {definition}
-      </span>
-    </span>
-  )
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
-
-const isPhase = (value: unknown): value is Phase =>
-  value === 'setup' || value === 'game' || value === 'editNames'
-
-const isScoringMode = (value: unknown): value is ScoringMode =>
-  value === 'twosAndThrees' || value === 'onesAndTwos'
-
-const isTeamId = (value: unknown): value is TeamId => value === 'A' || value === 'B'
-
-const isTeamSize = (value: unknown): value is TeamSize => value === 4 || value === 5
-
-const safeString = (value: unknown, fallback = ''): string =>
-  typeof value === 'string' ? value : fallback
-
-const safeNumber = (value: unknown, fallback = 0): number =>
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
-
-const clampToZero = (value: number): number => Math.max(0, value)
-
-const scoringActions = (mode: ScoringMode): ActionDefinition[] => {
-  const config = SCORING_CONFIG[mode]
-
-  return [
-    {
-      id: 'low-make',
-      label: `+${config.lowPoints} Make`,
-      short: `${config.lowLabel}M`,
-      tone: 'make',
-      delta: { lowPA: 1, lowPM: 1 },
-    },
-    {
-      id: 'low-miss',
-      label: `${config.lowLabel} Miss`,
-      short: `${config.lowLabel}A`,
-      tone: 'miss',
-      delta: { lowPA: 1 },
-    },
-    {
-      id: 'high-make',
-      label: `+${config.highPoints} Make`,
-      short: `${config.highLabel}M`,
-      tone: 'make',
-      delta: { highPA: 1, highPM: 1 },
-    },
-    {
-      id: 'high-miss',
-      label: `${config.highLabel} Miss`,
-      short: `${config.highLabel}A`,
-      tone: 'miss',
-      delta: { highPA: 1 },
-    },
-    { id: 'ast', label: 'AST', short: 'AST', tone: 'event', delta: { ast: 1 } },
-    { id: 'stl', label: 'STL', short: 'STL', tone: 'event', delta: { stl: 1 } },
-    { id: 'blk', label: 'BLK', short: 'BLK', tone: 'event', delta: { blk: 1 } },
-    { id: 'reb', label: 'REB', short: 'REB', tone: 'event', delta: { reb: 1 } },
-    { id: 'tov', label: 'TOV', short: 'TOV', tone: 'event', delta: { tov: 1 } },
-    { id: 'tovf', label: 'TOVF', short: 'TOVF', tone: 'event', delta: { tovf: 1 } },
-  ]
-}
-
-const blankStatLine = (): StatLine => ({
-  lowPA: 0,
-  lowPM: 0,
-  highPA: 0,
-  highPM: 0,
-  ast: 0,
-  stl: 0,
-  blk: 0,
-  reb: 0,
-  tov: 0,
-  tovf: 0,
-})
-
-const createSetupTeam = (label: string): SetupTeam => ({
-  label,
-  names: ['', '', '', '', ''],
-})
-
-const defaultSetup = (): Record<TeamId, SetupTeam> => ({
-  A: createSetupTeam('Team A'),
-  B: createSetupTeam('Team B'),
-})
-
-const normalizeStatLine = (value: unknown): StatLine => {
-  const source = isRecord(value) ? value : {}
-
-  return {
-    lowPA: clampToZero(safeNumber(source.lowPA)),
-    lowPM: clampToZero(safeNumber(source.lowPM)),
-    highPA: clampToZero(safeNumber(source.highPA)),
-    highPM: clampToZero(safeNumber(source.highPM)),
-    ast: clampToZero(safeNumber(source.ast)),
-    stl: clampToZero(safeNumber(source.stl)),
-    blk: clampToZero(safeNumber(source.blk)),
-    reb: clampToZero(safeNumber(source.reb)),
-    tov: clampToZero(safeNumber(source.tov)),
-    tovf: clampToZero(safeNumber(source.tovf)),
-  }
-}
-
-const normalizeStatDelta = (value: unknown): StatDelta => {
-  if (!isRecord(value)) {
-    return {}
-  }
-
-  const delta: StatDelta = {}
-
-  for (const statKey of STAT_KEYS) {
-    if (typeof value[statKey] === 'number' && Number.isFinite(value[statKey])) {
-      delta[statKey] = value[statKey]
-    }
-  }
-
-  return delta
-}
-
-const normalizeSetupTeam = (value: unknown, fallbackLabel: string): SetupTeam => {
-  const source = isRecord(value) ? value : {}
-  const rawNames = Array.isArray(source.names) ? source.names : []
-
-  return {
-    label: safeString(source.label, fallbackLabel),
-    names: Array.from({ length: MAX_PLAYERS_PER_TEAM }, (_, index) =>
-      safeString(rawNames[index], ''),
-    ),
-  }
-}
-
-const normalizePlayer = (
-  value: unknown,
-  teamId: TeamId,
-  index: number,
-): Player => {
-  const source = isRecord(value) ? value : {}
-
-  return {
-    id: safeString(source.id, `${teamId}-${index + 1}`),
-    name: safeString(source.name, `P${index + 1}`),
-    stats: normalizeStatLine(source.stats),
-  }
-}
-
-const normalizeTeam = (value: unknown, fallbackTeamId: TeamId): Team => {
-  const source = isRecord(value) ? value : {}
-  const id = isTeamId(source.id) ? source.id : fallbackTeamId
-  const rawPlayers = Array.isArray(source.players) ? source.players : []
-
-  return {
-    id,
-    label: safeString(source.label, `Team ${id}`),
-    players: rawPlayers.map((player, index) => normalizePlayer(player, id, index)),
-  }
-}
-
-const normalizeHistory = (value: unknown): LoggedAction[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const entries: LoggedAction[] = []
-
-  for (const item of value) {
-    if (!isRecord(item) || !isTeamId(item.teamId)) {
-      continue
-    }
-
-    entries.push({
-      teamId: item.teamId,
-      playerId: safeString(item.playerId),
-      delta: normalizeStatDelta(item.delta),
-      label: safeString(item.label),
-    })
-  }
-
-  return entries
-}
-
-const resolveSelectedPlayerId = (
-  teams: Team[],
-  selectedTeamId: TeamId,
-  selectedPlayerId: string,
-): string => {
-  const selectedTeam = teams.find((team) => team.id === selectedTeamId)
-  if (!selectedTeam || selectedTeam.players.length === 0) {
-    return ''
-  }
-
-  const matchingPlayer = selectedTeam.players.find(
-    (player) => player.id === selectedPlayerId,
-  )
-  return matchingPlayer?.id ?? selectedTeam.players[0].id
-}
-
-const loadPersistedState = (): PersistedState | null => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) {
-      return null
-    }
-
-    const parsed: unknown = JSON.parse(raw)
-    if (!isRecord(parsed)) {
-      return null
-    }
-
-    const rawSetup = isRecord(parsed.setup) ? parsed.setup : {}
-    const setup: Record<TeamId, SetupTeam> = {
-      A: normalizeSetupTeam(rawSetup.A, 'Team A'),
-      B: normalizeSetupTeam(rawSetup.B, 'Team B'),
-    }
-
-    const rawTeams = Array.isArray(parsed.teams) ? parsed.teams : []
-    const teamsById = new Map<TeamId, Team>()
-
-    for (const rawTeam of rawTeams) {
-      const fallbackTeamId: TeamId = teamsById.has('A') ? 'B' : 'A'
-      const normalized = normalizeTeam(rawTeam, fallbackTeamId)
-      if (!teamsById.has(normalized.id)) {
-        teamsById.set(normalized.id, normalized)
-      }
-    }
-
-    const teams = TEAM_IDS.flatMap((teamId) => {
-      const team = teamsById.get(teamId)
-      return team ? [team] : []
-    })
-
-    const playerCount: TeamSize = isTeamSize(parsed.playerCount)
-      ? parsed.playerCount
-      : 5
-    const setupScoringMode: ScoringMode = isScoringMode(parsed.setupScoringMode)
-      ? parsed.setupScoringMode
-      : 'twosAndThrees'
-    const gameScoringMode: ScoringMode = isScoringMode(parsed.gameScoringMode)
-      ? parsed.gameScoringMode
-      : setupScoringMode
-
-    const selectedTeamId: TeamId =
-      isTeamId(parsed.selectedTeamId) && teams.some((team) => team.id === parsed.selectedTeamId)
-        ? parsed.selectedTeamId
-        : teams[0]?.id ?? 'A'
-
-    const selectedPlayerId = resolveSelectedPlayerId(
-      teams,
-      selectedTeamId,
-      safeString(parsed.selectedPlayerId),
-    )
-
-    const initialPhase = isPhase(parsed.phase) ? parsed.phase : 'setup'
-    const phase: Phase =
-      teams.length === 0 && initialPhase !== 'setup' ? 'setup' : initialPhase
-
-    return {
-      phase,
-      playerCount,
-      setupScoringMode,
-      gameScoringMode,
-      setup,
-      teams,
-      selectedTeamId,
-      selectedPlayerId,
-      history: normalizeHistory(parsed.history),
-      lastAction: safeString(parsed.lastAction),
-    }
-  } catch {
-    return null
-  }
-}
-
-const persistState = (state: PersistedState) => {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // Ignore quota or serialization issues.
-  }
-}
-
-const playerPoints = (player: Player, scoringMode: ScoringMode): number => {
-  const config = SCORING_CONFIG[scoringMode]
-  return player.stats.lowPM * config.lowPoints + player.stats.highPM * config.highPoints
-}
-
-const teamPoints = (team: Team, scoringMode: ScoringMode): number =>
-  team.players.reduce((total, player) => total + playerPoints(player, scoringMode), 0)
-
-const teamStatTotal = (team: Team, statKey: StatKey): number =>
-  team.players.reduce((total, player) => total + player.stats[statKey], 0)
-
-const shootingLine = (made: number, attempts: number): string =>
-  `${made}/${attempts}`
-
-const playerFieldGoalsLine = (player: Player): string =>
-  shootingLine(
-    player.stats.lowPM + player.stats.highPM,
-    player.stats.lowPA + player.stats.highPA,
-  )
-
-const teamFieldGoalsLine = (team: Team): string =>
-  shootingLine(
-    teamStatTotal(team, 'lowPM') + teamStatTotal(team, 'highPM'),
-    teamStatTotal(team, 'lowPA') + teamStatTotal(team, 'highPA'),
-  )
-
-const teamColorClass = (teamId: TeamId): string =>
-  teamId === 'A' ? 'team-a' : 'team-b'
-
-const shareCaptureSignature = (teams: Team[], scoringMode: ScoringMode): string =>
-  JSON.stringify({
-    scoringMode,
-    teams: teams.map((team) => ({
-      id: team.id,
-      label: team.label,
-      players: team.players.map((player) => ({
-        id: player.id,
-        name: player.name,
-        stats: player.stats,
-      })),
-    })),
-  })
-
-const buildDefaultShareSelection = (teams: Team[]): Record<string, boolean> => {
-  const selection: Record<string, boolean> = {}
-
-  for (const team of teams) {
-    for (const player of team.players) {
-      selection[player.id] = true
-    }
-  }
-
-  return selection
-}
-
-const syncShareSelection = (
-  currentSelection: Record<string, boolean>,
-  teams: Team[],
-): Record<string, boolean> => {
-  const nextSelection: Record<string, boolean> = {}
-  let changed = false
-
-  for (const team of teams) {
-    for (const player of team.players) {
-      if (player.id in currentSelection) {
-        nextSelection[player.id] = currentSelection[player.id]
-      } else {
-        nextSelection[player.id] = true
-        changed = true
-      }
-    }
-  }
-
-  if (!changed) {
-    const currentIds = Object.keys(currentSelection)
-    const nextIds = Object.keys(nextSelection)
-
-    if (currentIds.length !== nextIds.length) {
-      changed = true
-    } else {
-      for (const playerId of currentIds) {
-        if (!(playerId in nextSelection)) {
-          changed = true
-          break
-        }
-      }
-    }
-  }
-
-  return changed ? nextSelection : currentSelection
-}
-
-const applyDelta = (
-  currentStats: StatLine,
-  delta: StatDelta,
-  direction: 1 | -1 = 1,
-): StatLine => {
-  const nextStats: StatLine = { ...currentStats }
-
-  for (const statKey of STAT_KEYS) {
-    const deltaValue = delta[statKey] ?? 0
-    nextStats[statKey] = Math.max(0, nextStats[statKey] + deltaValue * direction)
-  }
-
-  return nextStats
-}
+  SetupTeam,
+  Team,
+  TeamId,
+  TeamSize,
+} from './app/types'
+import { applyDelta, blankStatLine, scoringActions } from './app/utils/scoring'
+import {
+  buildDefaultShareSelection,
+  isDefaultPlayerName,
+  shareCaptureSignature,
+  syncShareSelection,
+} from './app/utils/share'
 
 function App() {
-  const [persistedState] = useState<PersistedState | null>(() => loadPersistedState())
-  const [phase, setPhase] = useState<Phase>(() => persistedState?.phase ?? 'setup')
+  const [persistedState] = useState<PersistedState | null>(() =>
+    loadPersistedState(),
+  )
+  const [phase, setPhase] = useState<Phase>(
+    () => persistedState?.phase ?? 'setup',
+  )
   const [playerCount, setPlayerCount] = useState<TeamSize>(
     () => persistedState?.playerCount ?? 5,
   )
@@ -643,9 +70,8 @@ function App() {
     () => persistedState?.lastAction ?? '',
   )
   const [shareStatus, setShareStatus] = useState<string>('')
-  const [preparedShareImage, setPreparedShareImage] = useState<PreparedShareImage | null>(
-    null,
-  )
+  const [preparedShareImage, setPreparedShareImage] =
+    useState<PreparedShareImage | null>(null)
   const [isSharing, setIsSharing] = useState(false)
   const [isPreparingShareImage, setIsPreparingShareImage] = useState(false)
   const [hasSharePrepareError, setHasSharePrepareError] = useState(false)
@@ -673,7 +99,6 @@ function App() {
   const selectedPlayer = selectedTeam?.players.find(
     (player) => player.id === selectedPlayerId,
   )
-  const currentScoringConfig = SCORING_CONFIG[gameScoringMode]
   const playersPerTeam = teams[0]?.players.length ?? playerCount
   const actionButtons = scoringActions(gameScoringMode)
   const shareTeams = useMemo(
@@ -688,7 +113,10 @@ function App() {
         .filter((team) => team.players.length > 0),
     [teams, shareSelectionByPlayerId],
   )
-  const totalSharePlayers = teams.reduce((total, team) => total + team.players.length, 0)
+  const totalSharePlayers = teams.reduce(
+    (total, team) => total + team.players.length,
+    0,
+  )
   const selectedSharePlayers = shareTeams.reduce(
     (total, team) => total + team.players.length,
     0,
@@ -1030,7 +458,8 @@ function App() {
         ? Number.POSITIVE_INFINITY
         : Date.now() - shareSheetTouchStartTimeRef.current
     const dragDistance = shareSheetDragOffsetRef.current
-    const shouldDismiss = dragDistance > 64 || (dragDistance > 28 && elapsedMs < 220)
+    const shouldDismiss =
+      dragDistance > 64 || (dragDistance > 28 && elapsedMs < 220)
     if (shouldDismiss) {
       const exitOffset = Math.max(window.innerHeight + 64, dragDistance + 220)
       const remainingDistance = Math.max(0, exitOffset - dragDistance)
@@ -1187,51 +616,48 @@ function App() {
     URL.revokeObjectURL(blobUrl)
   }
 
-  const prepareShareImage = useCallback(
-    async (): Promise<{
-      imageFile: File
-      signature: string
-      usedPreparedImage: boolean
-    }> => {
-      if (!sharedBoxScoreRef.current) {
-        throw new Error('Could not prepare share image.')
-      }
+  const prepareShareImage = useCallback(async (): Promise<{
+    imageFile: File
+    signature: string
+    usedPreparedImage: boolean
+  }> => {
+    if (!sharedBoxScoreRef.current) {
+      throw new Error('Could not prepare share image.')
+    }
 
-      const signature = currentShareSignature
-      if (preparedShareImage?.signature === signature) {
-        return {
-          imageFile: preparedShareImage.file,
-          signature,
-          usedPreparedImage: true,
-        }
-      }
-
-      const canvas = await html2canvas(sharedBoxScoreRef.current, {
-        backgroundColor: '#ffffff',
-        scale: Math.max(window.devicePixelRatio || 1, 2),
-      })
-
-      const imageBlob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, 'image/png')
-      })
-
-      if (!imageBlob) {
-        throw new Error('Could not generate screenshot image.')
-      }
-
-      const matchupLabel = shareTeams
-        .map((team) => team.label.trim().replace(/\s+/g, '-').toLowerCase())
-        .join('-vs-')
-      const filename = `${matchupLabel || 'game'}-box-score.png`
-      const imageFile = new File([imageBlob], filename, { type: 'image/png' })
+    const signature = currentShareSignature
+    if (preparedShareImage?.signature === signature) {
       return {
-        imageFile,
+        imageFile: preparedShareImage.file,
         signature,
-        usedPreparedImage: false,
+        usedPreparedImage: true,
       }
-    },
-    [currentShareSignature, preparedShareImage, shareTeams],
-  )
+    }
+
+    const canvas = await html2canvas(sharedBoxScoreRef.current, {
+      backgroundColor: '#ffffff',
+      scale: Math.max(window.devicePixelRatio || 1, 2),
+    })
+
+    const imageBlob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/png')
+    })
+
+    if (!imageBlob) {
+      throw new Error('Could not generate screenshot image.')
+    }
+
+    const matchupLabel = shareTeams
+      .map((team) => team.label.trim().replace(/\s+/g, '-').toLowerCase())
+      .join('-vs-')
+    const filename = `${matchupLabel || 'game'}-box-score.png`
+    const imageFile = new File([imageBlob], filename, { type: 'image/png' })
+    return {
+      imageFile,
+      signature,
+      usedPreparedImage: false,
+    }
+  }, [currentShareSignature, preparedShareImage, shareTeams])
 
   useEffect(() => {
     if (!isShareOptionsOpen || shareTeams.length === 0) {
@@ -1365,7 +791,10 @@ function App() {
         await navigator.share(sharePayload)
         setShareStatus('Shared successfully.')
       } else {
-        console.info('[shareBoxScore] Falling back to download.', shareDebugContext)
+        console.info(
+          '[shareBoxScore] Falling back to download.',
+          shareDebugContext,
+        )
         downloadBlob(imageFile, imageFile.name)
         setShareStatus('Image downloaded. Share it from Photos/Files.')
       }
@@ -1430,316 +859,60 @@ function App() {
 
   const showSetup = phase === 'setup' || teams.length === 0
   const showEditNames = phase === 'editNames' && teams.length > 0
-  const renderStatHeaderLabel = (abbreviation: string) => {
-    const definition = BOX_SCORE_STAT_DEFINITION_BY_ABBREVIATION.get(abbreviation)
-    if (!definition) {
-      return abbreviation
-    }
-
-    return <StatHeaderTerm abbreviation={abbreviation} definition={definition} />
-  }
-
-  const renderTeamBoxScore = (team: Team) => (
-    <article className="team-boxscore" key={team.id}>
-      <h3 className={`team-boxscore-title ${teamColorClass(team.id)}`}>
-        {team.label}
-      </h3>
-      <div className="table-wrap">
-        <table className="stats-table">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>PTS</th>
-              <th>{currentScoringConfig.lowLabel}</th>
-              <th>{currentScoringConfig.highLabel}</th>
-              <th>AST</th>
-              <th>STL</th>
-              <th>BLK</th>
-              <th>REB</th>
-              <th>TOV</th>
-              <th>{renderStatHeaderLabel('TOVF')}</th>
-              <th>FG</th>
-            </tr>
-          </thead>
-          <tbody>
-            {team.players.map((player) => (
-              <tr key={player.id}>
-                <td>{player.name}</td>
-                <td>{playerPoints(player, gameScoringMode)}</td>
-                <td>{shootingLine(player.stats.lowPM, player.stats.lowPA)}</td>
-                <td>{shootingLine(player.stats.highPM, player.stats.highPA)}</td>
-                <td>{player.stats.ast}</td>
-                <td>{player.stats.stl}</td>
-                <td>{player.stats.blk}</td>
-                <td>{player.stats.reb}</td>
-                <td>{player.stats.tov}</td>
-                <td>{player.stats.tovf}</td>
-                <td>{playerFieldGoalsLine(player)}</td>
-              </tr>
-            ))}
-            <tr className="total-row">
-              <td>Team</td>
-              <td>{teamPoints(team, gameScoringMode)}</td>
-              <td>
-                {shootingLine(
-                  teamStatTotal(team, 'lowPM'),
-                  teamStatTotal(team, 'lowPA'),
-                )}
-              </td>
-              <td>
-                {shootingLine(
-                  teamStatTotal(team, 'highPM'),
-                  teamStatTotal(team, 'highPA'),
-                )}
-              </td>
-              <td>{teamStatTotal(team, 'ast')}</td>
-              <td>{teamStatTotal(team, 'stl')}</td>
-              <td>{teamStatTotal(team, 'blk')}</td>
-              <td>{teamStatTotal(team, 'reb')}</td>
-              <td>{teamStatTotal(team, 'tov')}</td>
-              <td>{teamStatTotal(team, 'tovf')}</td>
-              <td>{teamFieldGoalsLine(team)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </article>
-  )
 
   return (
     <main className="app">
       <div className="app-shell">
         {showSetup || showEditNames ? (
-          <section className="panel">
-            <h2 className="panel-title">
-              {showEditNames ? 'Edit Names' : 'Game Setup'}
-            </h2>
-            <p className="panel-copy">
-              {showEditNames
-                ? 'Update team and player names without resetting game stats.'
-                : 'Set players and scoring once for both teams. First names are optional.'}
-            </p>
-
-            {showSetup ? (
-              <div className="shared-size-control">
-                <label className="field-label">Players Per Team</label>
-                <div className="size-toggle" role="group" aria-label="Players per team">
-                  <button
-                    type="button"
-                    className={playerCount === 4 ? 'toggle active' : 'toggle'}
-                    onClick={() => setPlayerCount(4)}
-                  >
-                    4 Players
-                  </button>
-                  <button
-                    type="button"
-                    className={playerCount === 5 ? 'toggle active' : 'toggle'}
-                    onClick={() => setPlayerCount(5)}
-                  >
-                    5 Players
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {showSetup ? (
-              <div className="shared-size-control">
-                <label className="field-label">Scoring Style</label>
-                <div className="size-toggle" role="group" aria-label="Scoring style">
-                  <button
-                    type="button"
-                    className={
-                      setupScoringMode === 'twosAndThrees' ? 'toggle active' : 'toggle'
-                    }
-                    onClick={() => setSetupScoringMode('twosAndThrees')}
-                  >
-                    2s & 3s
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      setupScoringMode === 'onesAndTwos' ? 'toggle active' : 'toggle'
-                    }
-                    onClick={() => setSetupScoringMode('onesAndTwos')}
-                  >
-                    1s & 2s
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="setup-stack">
-              {TEAM_IDS.map((teamId) => {
-                const team = setup[teamId]
-                return (
-                  <article className="team-card" key={teamId}>
-                    <div className="team-top-row">
-                      <input
-                        className="text-input"
-                        aria-label="Team Name"
-                        placeholder="Team Name"
-                        value={team.label}
-                        onChange={(event) =>
-                          updateTeamLabel(teamId, event.target.value)
-                        }
-                      />
-                    </div>
-
-                    <div className="name-grid">
-                      {Array.from({ length: playerCount }, (_, index) => {
-                        const playerName = team.names[index] ?? ''
-
-                        return (
-                          <label className="name-field" key={`${teamId}-${index + 1}`}>
-                            <span>P{index + 1}</span>
-                            <div className="name-input-wrap">
-                              <input
-                                className="text-input"
-                                placeholder="Optional"
-                                value={playerName}
-                                onChange={(event) =>
-                                  updatePlayerName(teamId, index, event.target.value)
-                                }
-                              />
-                              {playerName ? (
-                                <button
-                                  type="button"
-                                  className="clear-name-button"
-                                  tabIndex={-1}
-                                  aria-label={`Clear P${index + 1} name`}
-                                  onClick={() => updatePlayerName(teamId, index, '')}
-                                >
-                                  X
-                                </button>
-                              ) : null}
-                            </div>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
-
-            {showSetup ? (
-              <button type="button" className="primary-button" onClick={startGame}>
-                Start Tracking
-              </button>
-            ) : (
-              <div className="edit-actions">
-                <button type="button" className="small-button" onClick={saveEditedNames}>
-                  Save Names
-                </button>
-                <button
-                  type="button"
-                  className="small-button"
-                  onClick={cancelEditNames}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </section>
+          <SetupPanel
+            showSetup={showSetup}
+            showEditNames={showEditNames}
+            playerCount={playerCount}
+            setupScoringMode={setupScoringMode}
+            setup={setup}
+            onSetPlayerCount={setPlayerCount}
+            onSetSetupScoringMode={setSetupScoringMode}
+            onUpdateTeamLabel={updateTeamLabel}
+            onUpdatePlayerName={updatePlayerName}
+            onStartGame={startGame}
+            onSaveEditedNames={saveEditedNames}
+            onCancelEditNames={cancelEditNames}
+          />
         ) : (
           <>
-            <section className="panel score-panel">
-              <div className="score-strip">
-                {teams.map((team) => (
-                  <article
-                    key={team.id}
-                    className={`team-score ${teamColorClass(team.id)}${
-                      team.id === selectedTeamId ? ' active' : ''
-                    }`}
-                  >
-                    <span>{team.label}</span>
-                    <strong>{teamPoints(team, gameScoringMode)}</strong>
-                  </article>
-                ))}
-              </div>
+            <ScorePanel
+              teams={teams}
+              selectedTeamId={selectedTeamId}
+              gameScoringMode={gameScoringMode}
+              historyLength={history.length}
+              lastAction={lastAction}
+              onUndoLastAction={undoLastAction}
+              onBeginEditNames={beginEditNames}
+              onBackToSetup={backToSetup}
+            />
 
-              <div className="meta-row">
-                <button
-                  type="button"
-                  className="small-button"
-                  onClick={undoLastAction}
-                  disabled={history.length === 0}
-                >
-                  Undo
-                </button>
-                <button type="button" className="small-button" onClick={beginEditNames}>
-                  Edit Names
-                </button>
-                <button
-                  type="button"
-                  className="small-button danger-text"
-                  onClick={backToSetup}
-                >
-                  Reset
-                </button>
-              </div>
-
-              <p className="log-line">{lastAction || 'Waiting for first play.'}</p>
-            </section>
-
-            <section className="panel control-panel">
-              <div className="active-target">
-                <span>Logging for</span>
-                <strong>
-                  {selectedTeam?.label ?? 'Team'} /{' '}
-                  {selectedPlayer?.name ?? 'Select a player'}
-                </strong>
-                <small>
-                  Scoring: {currentScoringConfig.lowLabel} /{' '}
-                  {currentScoringConfig.highLabel}
-                </small>
-              </div>
-
-              <div className="player-board">
-                {teams.map((team) => (
-                  <div className="team-player-column" key={team.id}>
-                    <p className="team-player-label">{team.label}</p>
-                    <div
-                      className="team-player-list"
-                      style={{ '--player-count': team.players.length } as CSSProperties}
-                    >
-                      {team.players.map((player) => (
-                        <button
-                          type="button"
-                          key={player.id}
-                          className={`player-pill ${teamColorClass(team.id)}${
-                            team.id === selectedTeamId && player.id === selectedPlayerId
-                              ? ' active'
-                              : ''
-                          }`}
-                          onClick={() => selectPlayerTarget(team.id, player.id)}
-                        >
-                          <span>{player.name}</span>
-                          <small>{playerPoints(player, gameScoringMode)} pts</small>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="action-grid">
-                {actionButtons.map((action) => (
-                  <button
-                    type="button"
-                    key={action.id}
-                    className={`action-button ${action.tone}`}
-                    onClick={() => logAction(action)}
-                    disabled={!selectedPlayerId}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-            </section>
+            <ControlPanel
+              selectedTeamLabel={selectedTeam?.label}
+              selectedPlayerName={selectedPlayer?.name}
+              teams={teams}
+              selectedTeamId={selectedTeamId}
+              selectedPlayerId={selectedPlayerId}
+              gameScoringMode={gameScoringMode}
+              actionButtons={actionButtons}
+              onSelectPlayerTarget={selectPlayerTarget}
+              onLogAction={logAction}
+            />
 
             <section className="panel table-panel">
-              <div className="onscreen-boxscore">{teams.map(renderTeamBoxScore)}</div>
+              <div className="onscreen-boxscore">
+                {teams.map((team) => (
+                  <TeamBoxScore
+                    key={team.id}
+                    team={team}
+                    scoringMode={gameScoringMode}
+                  />
+                ))}
+              </div>
 
               <div className="table-actions">
                 <div className="share-action-row">
@@ -1754,175 +927,51 @@ function App() {
                 </div>
                 {totalSharePlayers > 0 ? (
                   <p className="share-selection-copy">
-                    {selectedSharePlayers} of {totalSharePlayers} players selected
+                    {selectedSharePlayers} of {totalSharePlayers} players
+                    selected
                   </p>
                 ) : null}
               </div>
 
-              {shareStatusMessage ? <p className="share-status">{shareStatusMessage}</p> : null}
+              {shareStatusMessage ? (
+                <p className="share-status">{shareStatusMessage}</p>
+              ) : null}
 
-              {shareCapturePortalRoot
-                ? createPortal(
-                    <div className="share-capture-root" aria-hidden="true">
-                      <div className="shared-boxscore" ref={sharedBoxScoreRef}>
-                        <div
-                          className="game-score-strip"
-                          style={
-                            {
-                              '--team-count': Math.max(shareTeams.length, 1),
-                            } as CSSProperties
-                          }
-                        >
-                          {shareTeams.map((team) => (
-                            <div
-                              key={team.id}
-                              className={`game-score-team ${teamColorClass(team.id)}`}
-                            >
-                              <span>{team.label}</span>
-                              <strong>{teamPoints(team, gameScoringMode)}</strong>
-                            </div>
-                          ))}
-                        </div>
-                        {shareTeams.map(renderTeamBoxScore)}
-                        <div className="shared-boxscore-footer">
-                          <p className="shared-boxscore-scoring">
-                            Format: {playersPerTeam}v{playersPerTeam},{' '}
-                            {currentScoringConfig.lowLabel}/{currentScoringConfig.highLabel}
-                          </p>
-                          {SHARED_BOX_SCORE_GLOSSARY_LINE ? (
-                            <p className="shared-boxscore-definitions">
-                              Definitions: {SHARED_BOX_SCORE_GLOSSARY_LINE}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>,
-                    shareCapturePortalRoot,
-                  )
-                : null}
+              <SharedBoxScorePortal
+                shareCapturePortalRoot={shareCapturePortalRoot}
+                sharedBoxScoreRef={sharedBoxScoreRef}
+                shareTeams={shareTeams}
+                playersPerTeam={playersPerTeam}
+                gameScoringMode={gameScoringMode}
+              />
             </section>
 
-            {isShareOptionsOpen ? (
-              <div
-                className="share-sheet-backdrop"
-                role="presentation"
-                onClick={closeShareOptions}
-              >
-                <section
-                  className="share-sheet"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label="Share options"
-                  style={
-                    shareSheetDragOffset > 0
-                      ? {
-                          transform: `translateY(${shareSheetDragOffset}px)`,
-                          transition: isShareSheetDragging
-                            ? 'none'
-                            : isShareSheetClosing
-                              ? `transform ${shareSheetTransitionMs}ms ease-out`
-                              : `transform ${shareSheetTransitionMs}ms cubic-bezier(0.22, 1, 0.36, 1)`,
-                        }
-                      : undefined
-                  }
-                  onClick={(event) => event.stopPropagation()}
-                  onTouchStart={handleShareSheetTouchStart}
-                  onTouchMove={handleShareSheetTouchMove}
-                  onTouchEnd={handleShareSheetTouchEnd}
-                  onTouchCancel={handleShareSheetTouchEnd}
-                >
-                  <div className="share-sheet-handle" />
-                  <header className="share-sheet-header">
-                    <h3>Share options</h3>
-                    <button
-                      type="button"
-                      className="share-sheet-close"
-                      onClick={closeShareOptions}
-                    >
-                      Close
-                    </button>
-                  </header>
-                  <p className="share-sheet-count">
-                    {selectedSharePlayers} of {totalSharePlayers} players selected
-                  </p>
-
-                  <div className="share-sheet-quick-actions">
-                    <button
-                      type="button"
-                      className="share-chip"
-                      onClick={() => setShareSelectionForAllPlayers(true)}
-                    >
-                      All
-                    </button>
-                    <button
-                      type="button"
-                      className="share-chip"
-                      onClick={() => setShareSelectionForAllPlayers(false)}
-                    >
-                      None
-                    </button>
-                    <button
-                      type="button"
-                      className="share-chip"
-                      onClick={setShareSelectionForNamedPlayersOnly}
-                    >
-                      Named Only
-                    </button>
-                    {teams.map((team) => (
-                      <button
-                        key={team.id}
-                        type="button"
-                        className="share-chip"
-                        onClick={() => setShareSelectionForTeamOnly(team.id)}
-                      >
-                        {team.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="share-sheet-team-list" ref={shareSheetTeamListRef}>
-                    {teams.map((team) => (
-                      <section className="share-team-group" key={team.id}>
-                        <p className="share-team-heading">{team.label}</p>
-                        <div className="share-player-checklist">
-                          {team.players.map((player) => (
-                            <label className="share-player-option" key={player.id}>
-                              <input
-                                type="checkbox"
-                                checked={shareSelectionByPlayerId[player.id] !== false}
-                                onChange={() => toggleSharePlayer(player.id)}
-                              />
-                              <span>{player.name}</span>
-                              <small>{playerPoints(player, gameScoringMode)} pts</small>
-                            </label>
-                          ))}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-
-                  <div className="share-sheet-footer">
-                    <button
-                      type="button"
-                      className={`primary-button share-apply-button share-sheet-share-button${
-                        isSheetShareReady ? ' ready' : ''
-                      }`}
-                      onClick={shareFromShareOptions}
-                      disabled={!isSheetShareReady}
-                    >
-                      {selectedSharePlayers > 0 && isPreparingShareImage ? (
-                        <>
-                          <span className="share-spinner" aria-hidden="true" />
-                          <span>Preparing</span>
-                        </>
-                      ) : (
-                        'Share'
-                      )}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            ) : null}
+            <ShareOptionsSheet
+              isOpen={isShareOptionsOpen}
+              shareSheetDragOffset={shareSheetDragOffset}
+              isShareSheetDragging={isShareSheetDragging}
+              isShareSheetClosing={isShareSheetClosing}
+              shareSheetTransitionMs={shareSheetTransitionMs}
+              selectedSharePlayers={selectedSharePlayers}
+              totalSharePlayers={totalSharePlayers}
+              teams={teams}
+              shareSelectionByPlayerId={shareSelectionByPlayerId}
+              gameScoringMode={gameScoringMode}
+              isPreparingShareImage={isPreparingShareImage}
+              isSheetShareReady={isSheetShareReady}
+              shareSheetTeamListRef={shareSheetTeamListRef}
+              onClose={closeShareOptions}
+              onTouchStart={handleShareSheetTouchStart}
+              onTouchMove={handleShareSheetTouchMove}
+              onTouchEnd={handleShareSheetTouchEnd}
+              onSetShareSelectionForAllPlayers={setShareSelectionForAllPlayers}
+              onSetShareSelectionForNamedPlayersOnly={
+                setShareSelectionForNamedPlayersOnly
+              }
+              onSetShareSelectionForTeamOnly={setShareSelectionForTeamOnly}
+              onToggleSharePlayer={toggleSharePlayer}
+              onShare={shareFromShareOptions}
+            />
           </>
         )}
       </div>

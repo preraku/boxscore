@@ -1,0 +1,112 @@
+@media (min-width: 48rem) {
+  .app-shell {
+    gap: 0.9rem;
+  }
+
+  .panel {
+    padding: 1rem;
+  }
+
+  .setup-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .player-board {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.45rem;
+  }
+
+  .team-player-column {
+    grid-template-columns: 5.8rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .team-player-list {
+    grid-template-columns: repeat(var(--player-count), minmax(0, 1fr));
+  }
+
+  .team-player-label {
+    text-align: right;
+  }
+
+  .action-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .table-actions {
+    justify-items: end;
+  }
+
+  .share-action-row {
+    min-width: 16rem;
+  }
+
+  .share-selection-copy {
+    text-align: right;
+  }
+
+  .shared-boxscore {
+    padding: 0.7rem;
+  }
+
+  .share-button {
+    min-width: 10.5rem;
+    padding: 0 0.85rem;
+  }
+
+  .share-sheet-backdrop {
+    align-items: center;
+    justify-items: center;
+    padding: 1rem;
+  }
+
+  .share-sheet {
+    width: min(29rem, 100%);
+    border-radius: 1rem;
+    border-bottom: 1px solid rgba(17, 33, 50, 0.16);
+    max-height: min(82vh, 40rem);
+    max-height: min(82dvh, 40rem);
+  }
+
+  .share-sheet-header {
+    justify-content: space-between;
+  }
+
+  .share-sheet-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    border: 1px solid rgba(17, 33, 50, 0.2);
+    border-radius: 0.62rem;
+    background: rgba(255, 255, 255, 0.96);
+    color: #2f4251;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .share-sheet-handle {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+
+  .share-sheet-backdrop,
+  .share-sheet {
+    animation: none;
+  }
+
+  .share-spinner {
+    animation: none;
+  }
+
+  button {
+    transition: none;
+  }
+}
