@@ -1,13 +1,25 @@
-import type { TouchEvent as ReactTouchEvent, RefObject } from 'react'
+import { useEffect, useState } from 'react'
+import { Sheet } from 'react-modal-sheet'
 import type { ScoringMode, Team, TeamId } from '../types'
 import { playerPoints } from '../utils/scoring'
 
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(min-width: 48rem)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 48rem)')
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isDesktop
+}
+
 type ShareOptionsSheetProps = {
   isOpen: boolean
-  shareSheetDragOffset: number
-  isShareSheetDragging: boolean
-  isShareSheetClosing: boolean
-  shareSheetTransitionMs: number
   selectedSharePlayers: number
   totalSharePlayers: number
   teams: Team[]
@@ -15,11 +27,7 @@ type ShareOptionsSheetProps = {
   gameScoringMode: ScoringMode
   isPreparingShareImage: boolean
   isSheetShareReady: boolean
-  shareSheetTeamListRef: RefObject<HTMLDivElement | null>
   onClose: () => void
-  onTouchStart: (event: ReactTouchEvent<HTMLElement>) => void
-  onTouchMove: (event: ReactTouchEvent<HTMLElement>) => void
-  onTouchEnd: () => void
   onSetShareSelectionForAllPlayers: (isSelected: boolean) => void
   onSetShareSelectionForNamedPlayersOnly: () => void
   onSetShareSelectionForTeamOnly: (teamId: TeamId) => void
@@ -29,10 +37,6 @@ type ShareOptionsSheetProps = {
 
 export const ShareOptionsSheet = ({
   isOpen,
-  shareSheetDragOffset,
-  isShareSheetDragging,
-  isShareSheetClosing,
-  shareSheetTransitionMs,
   selectedSharePlayers,
   totalSharePlayers,
   teams,
@@ -40,132 +44,164 @@ export const ShareOptionsSheet = ({
   gameScoringMode,
   isPreparingShareImage,
   isSheetShareReady,
-  shareSheetTeamListRef,
   onClose,
-  onTouchStart,
-  onTouchMove,
-  onTouchEnd,
   onSetShareSelectionForAllPlayers,
   onSetShareSelectionForNamedPlayersOnly,
   onSetShareSelectionForTeamOnly,
   onToggleSharePlayer,
   onShare,
 }: ShareOptionsSheetProps) => {
-  if (!isOpen) {
-    return null
+  const isDesktop = useIsDesktop()
+
+  const quickActions = (
+    <div className="share-sheet-quick-actions">
+      <button
+        type="button"
+        className="share-chip"
+        onClick={() => onSetShareSelectionForAllPlayers(true)}
+      >
+        All
+      </button>
+      <button
+        type="button"
+        className="share-chip"
+        onClick={() => onSetShareSelectionForAllPlayers(false)}
+      >
+        None
+      </button>
+      <button
+        type="button"
+        className="share-chip"
+        onClick={onSetShareSelectionForNamedPlayersOnly}
+      >
+        Named Only
+      </button>
+      {teams.map((team) => (
+        <button
+          key={team.id}
+          type="button"
+          className="share-chip"
+          onClick={() => onSetShareSelectionForTeamOnly(team.id)}
+        >
+          {team.label}
+        </button>
+      ))}
+    </div>
+  )
+
+  const teamList = (
+    <div className="share-sheet-team-list">
+      {teams.map((team) => (
+        <section className="share-team-group" key={team.id}>
+          <p className="share-team-heading">{team.label}</p>
+          <div className="share-player-checklist">
+            {team.players.map((player) => (
+              <label className="share-player-option" key={player.id}>
+                <input
+                  type="checkbox"
+                  checked={shareSelectionByPlayerId[player.id] !== false}
+                  onChange={() => onToggleSharePlayer(player.id)}
+                />
+                <span>{player.name}</span>
+                <small>{playerPoints(player, gameScoringMode)} pts</small>
+              </label>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+
+  const shareButton = (
+    <button
+      type="button"
+      className={`primary-button share-apply-button share-sheet-share-button${
+        isSheetShareReady ? ' ready' : ''
+      }`}
+      onClick={onShare}
+      disabled={!isSheetShareReady}
+    >
+      {selectedSharePlayers > 0 && isPreparingShareImage ? (
+        <>
+          <span className="share-spinner" aria-hidden="true" />
+          <span>Preparing</span>
+        </>
+      ) : (
+        'Share'
+      )}
+    </button>
+  )
+
+  if (isDesktop) {
+    if (!isOpen) return null
+    return (
+      <div className="share-sheet-backdrop" role="presentation" onClick={onClose}>
+        <section
+          className="share-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Share options"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="share-sheet-handle" />
+          <header className="share-sheet-header">
+            <h3>Share options</h3>
+            <button type="button" className="share-sheet-close" onClick={onClose}>
+              Close
+            </button>
+          </header>
+          <p className="share-sheet-count">
+            {selectedSharePlayers} of {totalSharePlayers} players selected
+          </p>
+          {quickActions}
+          {teamList}
+          <div className="share-sheet-footer">{shareButton}</div>
+        </section>
+      </div>
+    )
   }
 
   return (
-    <div className="share-sheet-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="share-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Share options"
-        style={
-          shareSheetDragOffset > 0
-            ? {
-                transform: `translateY(${shareSheetDragOffset}px)`,
-                transition: isShareSheetDragging
-                  ? 'none'
-                  : isShareSheetClosing
-                    ? `transform ${shareSheetTransitionMs}ms ease-out`
-                    : `transform ${shareSheetTransitionMs}ms cubic-bezier(0.22, 1, 0.36, 1)`,
-              }
-            : undefined
-        }
-        onClick={(event) => event.stopPropagation()}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
+    <Sheet isOpen={isOpen} onClose={onClose} detent="content">
+      <Sheet.Container
+        style={{
+          background: 'var(--ss-bg)',
+          borderTopLeftRadius: 'var(--ss-radius)',
+          borderTopRightRadius: 'var(--ss-radius)',
+          boxShadow: 'var(--ss-shadow)',
+          border: '1px solid var(--ss-border-color)',
+          borderBottom: 'none',
+        }}
       >
-        <div className="share-sheet-handle" />
-        <header className="share-sheet-header">
-          <h3>Share options</h3>
-          <button type="button" className="share-sheet-close" onClick={onClose}>
-            Close
-          </button>
-        </header>
-        <p className="share-sheet-count">
-          {selectedSharePlayers} of {totalSharePlayers} players selected
-        </p>
+        <Sheet.Header />
 
-        <div className="share-sheet-quick-actions">
-          <button
-            type="button"
-            className="share-chip"
-            onClick={() => onSetShareSelectionForAllPlayers(true)}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            className="share-chip"
-            onClick={() => onSetShareSelectionForAllPlayers(false)}
-          >
-            None
-          </button>
-          <button
-            type="button"
-            className="share-chip"
-            onClick={onSetShareSelectionForNamedPlayersOnly}
-          >
-            Named Only
-          </button>
-          {teams.map((team) => (
-            <button
-              key={team.id}
-              type="button"
-              className="share-chip"
-              onClick={() => onSetShareSelectionForTeamOnly(team.id)}
-            >
-              {team.label}
-            </button>
-          ))}
+        <div className="share-sheet-fixed-top">
+          <header className="share-sheet-header">
+            <h3>Share options</h3>
+          </header>
+          <p className="share-sheet-count">
+            {selectedSharePlayers} of {totalSharePlayers} players selected
+          </p>
+          {quickActions}
         </div>
 
-        <div className="share-sheet-team-list" ref={shareSheetTeamListRef}>
-          {teams.map((team) => (
-            <section className="share-team-group" key={team.id}>
-              <p className="share-team-heading">{team.label}</p>
-              <div className="share-player-checklist">
-                {team.players.map((player) => (
-                  <label className="share-player-option" key={player.id}>
-                    <input
-                      type="checkbox"
-                      checked={shareSelectionByPlayerId[player.id] !== false}
-                      onChange={() => onToggleSharePlayer(player.id)}
-                    />
-                    <span>{player.name}</span>
-                    <small>{playerPoints(player, gameScoringMode)} pts</small>
-                  </label>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+        <Sheet.Content
+          scrollStyle={{
+            paddingTop: 'var(--ss-gap)',
+            paddingLeft: 'var(--ss-h-pad)',
+            paddingRight: 'calc(var(--ss-h-pad) + 0.1rem)',
+            paddingBottom: '0.5rem',
+          }}
+        >
+          {teamList}
+        </Sheet.Content>
 
-        <div className="share-sheet-footer">
-          <button
-            type="button"
-            className={`primary-button share-apply-button share-sheet-share-button${
-              isSheetShareReady ? ' ready' : ''
-            }`}
-            onClick={onShare}
-            disabled={!isSheetShareReady}
-          >
-            {selectedSharePlayers > 0 && isPreparingShareImage ? (
-              <>
-                <span className="share-spinner" aria-hidden="true" />
-                <span>Preparing</span>
-              </>
-            ) : (
-              'Share'
-            )}
-          </button>
-        </div>
-      </section>
-    </div>
+        <div className="share-sheet-footer">{shareButton}</div>
+      </Sheet.Container>
+      <Sheet.Backdrop
+        onClick={onClose}
+        style={{ backgroundColor: 'rgba(12, 24, 38, 0.36)' }}
+      />
+    </Sheet>
   )
 }

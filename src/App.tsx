@@ -1,6 +1,5 @@
 import html2canvas from 'html2canvas'
 import {
-  type TouchEvent as ReactTouchEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -79,21 +78,10 @@ function App() {
     Record<string, boolean>
   >(() => buildDefaultShareSelection(persistedState?.teams ?? []))
   const [isShareOptionsOpen, setIsShareOptionsOpen] = useState(false)
-  const [shareSheetDragOffset, setShareSheetDragOffset] = useState(0)
-  const [isShareSheetDragging, setIsShareSheetDragging] = useState(false)
-  const [shareSheetTransitionMs, setShareSheetTransitionMs] = useState(220)
-  const [isShareSheetClosing, setIsShareSheetClosing] = useState(false)
   const [shareCapturePortalRoot, setShareCapturePortalRoot] =
     useState<HTMLDivElement | null>(null)
   const sharedBoxScoreRef = useRef<HTMLDivElement | null>(null)
-  const shareSheetTeamListRef = useRef<HTMLDivElement | null>(null)
-  const shareSheetTouchStartYRef = useRef<number | null>(null)
-  const shareSheetTouchStartTimeRef = useRef<number | null>(null)
-  const shareSheetDismissTimeoutRef = useRef<number | null>(null)
   const sharePrepareJobIdRef = useRef(0)
-  const shareSheetDragOffsetRef = useRef(0)
-  const shareSheetCanDragRef = useRef(false)
-  const shareSheetTouchStartedInListRef = useRef(false)
 
   const selectedTeam = teams.find((team) => team.id === selectedTeamId)
   const selectedPlayer = selectedTeam?.players.find(
@@ -136,30 +124,6 @@ function App() {
     teams.length > 0 && selectedSharePlayers === 0
       ? 'Select at least one player in Share options.'
       : shareStatus
-
-  const resetShareSheetDrag = () => {
-    if (shareSheetDismissTimeoutRef.current !== null) {
-      window.clearTimeout(shareSheetDismissTimeoutRef.current)
-      shareSheetDismissTimeoutRef.current = null
-    }
-    shareSheetTouchStartYRef.current = null
-    shareSheetTouchStartTimeRef.current = null
-    shareSheetCanDragRef.current = false
-    shareSheetTouchStartedInListRef.current = false
-    shareSheetDragOffsetRef.current = 0
-    setShareSheetTransitionMs(220)
-    setIsShareSheetClosing(false)
-    setShareSheetDragOffset(0)
-    setIsShareSheetDragging(false)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (shareSheetDismissTimeoutRef.current !== null) {
-        window.clearTimeout(shareSheetDismissTimeoutRef.current)
-      }
-    }
-  }, [])
 
   useEffect(() => {
     const portalRoot = document.createElement('div')
@@ -211,16 +175,7 @@ function App() {
   }, [teams])
 
   useEffect(() => {
-    if (!isShareOptionsOpen) {
-      shareSheetTouchStartYRef.current = null
-      shareSheetTouchStartTimeRef.current = null
-      shareSheetCanDragRef.current = false
-      shareSheetTouchStartedInListRef.current = false
-      shareSheetDragOffsetRef.current = 0
-      setShareSheetDragOffset(0)
-      setIsShareSheetDragging(false)
-      return
-    }
+    if (!isShareOptionsOpen) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -228,36 +183,8 @@ function App() {
       }
     }
 
-    const scrollY = window.scrollY
-    const originalBodyOverflow = document.body.style.overflow
-    const originalBodyPosition = document.body.style.position
-    const originalBodyTop = document.body.style.top
-    const originalBodyLeft = document.body.style.left
-    const originalBodyRight = document.body.style.right
-    const originalBodyWidth = document.body.style.width
-    const originalHtmlOverflow = document.documentElement.style.overflow
-
-    document.body.style.overflow = 'hidden'
-    document.body.style.position = 'fixed'
-    document.body.style.top = `-${scrollY}px`
-    document.body.style.left = '0'
-    document.body.style.right = '0'
-    document.body.style.width = '100%'
-    document.documentElement.style.overflow = 'hidden'
-
     window.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      document.body.style.overflow = originalBodyOverflow
-      document.body.style.position = originalBodyPosition
-      document.body.style.top = originalBodyTop
-      document.body.style.left = originalBodyLeft
-      document.body.style.right = originalBodyRight
-      document.body.style.width = originalBodyWidth
-      document.documentElement.style.overflow = originalHtmlOverflow
-      window.scrollTo(0, scrollY)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isShareOptionsOpen])
 
   const updateTeamLabel = (teamId: TeamId, label: string) => {
@@ -381,10 +308,8 @@ function App() {
       return
     }
 
-    resetShareSheetDrag()
     setShareStatus('')
     setHasSharePrepareError(false)
-    setShareSheetTransitionMs(220)
     setIsShareOptionsOpen(true)
   }
 
@@ -392,94 +317,7 @@ function App() {
     sharePrepareJobIdRef.current += 1
     setIsPreparingShareImage(false)
     setHasSharePrepareError(false)
-    resetShareSheetDrag()
     setIsShareOptionsOpen(false)
-  }
-
-  const handleShareSheetTouchStart = (event: ReactTouchEvent<HTMLElement>) => {
-    if (event.touches.length !== 1) {
-      return
-    }
-
-    const touchStartY = event.touches[0].clientY
-    const teamListElement = shareSheetTeamListRef.current
-    const targetNode = event.target as Node | null
-    const startedInList =
-      !!teamListElement && !!targetNode && teamListElement.contains(targetNode)
-
-    shareSheetTouchStartYRef.current = touchStartY
-    shareSheetTouchStartTimeRef.current = Date.now()
-    shareSheetTouchStartedInListRef.current = startedInList
-    shareSheetCanDragRef.current =
-      !startedInList || (teamListElement?.scrollTop ?? 0) <= 0
-  }
-
-  const handleShareSheetTouchMove = (event: ReactTouchEvent<HTMLElement>) => {
-    const touchStartY = shareSheetTouchStartYRef.current
-    if (touchStartY === null || event.touches.length !== 1) {
-      return
-    }
-
-    const nextOffset = Math.max(0, event.touches[0].clientY - touchStartY)
-    const teamListElement = shareSheetTeamListRef.current
-    if (
-      shareSheetTouchStartedInListRef.current &&
-      teamListElement &&
-      teamListElement.scrollTop > 0
-    ) {
-      shareSheetCanDragRef.current = false
-      return
-    }
-
-    shareSheetCanDragRef.current = true
-    if (nextOffset <= 0) {
-      return
-    }
-
-    if (event.cancelable) {
-      event.preventDefault()
-    }
-
-    if (!isShareSheetDragging) {
-      setIsShareSheetDragging(true)
-    }
-
-    shareSheetDragOffsetRef.current = nextOffset
-    setShareSheetDragOffset(nextOffset)
-  }
-
-  const handleShareSheetTouchEnd = () => {
-    if (shareSheetTouchStartYRef.current === null) {
-      return
-    }
-
-    const elapsedMs =
-      shareSheetTouchStartTimeRef.current === null
-        ? Number.POSITIVE_INFINITY
-        : Date.now() - shareSheetTouchStartTimeRef.current
-    const dragDistance = shareSheetDragOffsetRef.current
-    const shouldDismiss =
-      dragDistance > 64 || (dragDistance > 28 && elapsedMs < 220)
-    if (shouldDismiss) {
-      const exitOffset = Math.max(window.innerHeight + 64, dragDistance + 220)
-      const remainingDistance = Math.max(0, exitOffset - dragDistance)
-      const dismissDurationMs = Math.min(
-        1020,
-        Math.max(540, Math.round(remainingDistance / 0.8)),
-      )
-      setIsShareSheetDragging(false)
-      setIsShareSheetClosing(true)
-      setShareSheetTransitionMs(dismissDurationMs)
-      shareSheetDragOffsetRef.current = exitOffset
-      setShareSheetDragOffset(exitOffset)
-      shareSheetDismissTimeoutRef.current = window.setTimeout(() => {
-        shareSheetDismissTimeoutRef.current = null
-        setIsShareOptionsOpen(false)
-      }, dismissDurationMs)
-      return
-    }
-
-    resetShareSheetDrag()
   }
 
   const toggleSharePlayer = (playerId: string) => {
@@ -948,10 +786,6 @@ function App() {
 
             <ShareOptionsSheet
               isOpen={isShareOptionsOpen}
-              shareSheetDragOffset={shareSheetDragOffset}
-              isShareSheetDragging={isShareSheetDragging}
-              isShareSheetClosing={isShareSheetClosing}
-              shareSheetTransitionMs={shareSheetTransitionMs}
               selectedSharePlayers={selectedSharePlayers}
               totalSharePlayers={totalSharePlayers}
               teams={teams}
@@ -959,11 +793,7 @@ function App() {
               gameScoringMode={gameScoringMode}
               isPreparingShareImage={isPreparingShareImage}
               isSheetShareReady={isSheetShareReady}
-              shareSheetTeamListRef={shareSheetTeamListRef}
               onClose={closeShareOptions}
-              onTouchStart={handleShareSheetTouchStart}
-              onTouchMove={handleShareSheetTouchMove}
-              onTouchEnd={handleShareSheetTouchEnd}
               onSetShareSelectionForAllPlayers={setShareSelectionForAllPlayers}
               onSetShareSelectionForNamedPlayersOnly={
                 setShareSelectionForNamedPlayersOnly
